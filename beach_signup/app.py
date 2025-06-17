@@ -27,39 +27,39 @@ def show_signup_page(participant_session_id, current_participant_profile):
     st.subheader("Current Availability")
 
     for activity_item in activities:
-        st.markdown(f"#### {activity_item}") # Use a smaller header for each activity
+        with st.expander(label=activity_item, expanded=False):
+            activity_timeslots_info = []
+            all_slots_for_activity_full = True
 
-        activity_timeslots_info = []
-        all_slots_for_activity_full = True # Flag to see if all timeslots for this activity are full
+            for timeslot_item in timeslots:
+                count = dm.get_signup_count(activity_item, timeslot_item)
+                available_slots = MAX_CAPACITY_PER_SLOT - count
 
-        for timeslot_item in timeslots:
-            count = dm.get_signup_count(activity_item, timeslot_item)
-            available_slots = MAX_CAPACITY_PER_SLOT - count
+                status_text = ""
+                if available_slots <= 0:
+                    status_text = f"**{timeslot_item}:** <font color='red'>Full</font>"
+                elif available_slots <= 3:
+                    status_text = f"**{timeslot_item}:** <font color='orange'>{available_slots} Slots Available</font>"
+                    all_slots_for_activity_full = False
+                else:
+                    status_text = f"**{timeslot_item}:** <font color='green'>{available_slots} Slots Available</font>"
+                    all_slots_for_activity_full = False
+                activity_timeslots_info.append(status_text)
 
-            status_text = ""
-            if available_slots <= 0:
-                status_text = f"**{timeslot_item}:** <font color='red'>Full</font>"
-            elif available_slots <= 3: # Few slots left
-                status_text = f"**{timeslot_item}:** <font color='orange'>{available_slots} Slots Available</font>"
-                all_slots_for_activity_full = False
-            else: # More than 3 slots
-                status_text = f"**{timeslot_item}:** <font color='green'>{available_slots} Slots Available</font>"
-                all_slots_for_activity_full = False
-            activity_timeslots_info.append(status_text)
+            if all_slots_for_activity_full:
+                 st.markdown(f"<font color='red'>All timeslots for this activity are currently full.</font>", unsafe_allow_html=True)
+            else:
+                num_columns = 2
+                if len(timeslots) > 6:
+                     num_columns = 3
 
-        if all_slots_for_activity_full:
-             st.markdown(f"<font color='red'>All timeslots for {activity_item} are currently full.</font>", unsafe_allow_html=True)
-        else:
-            # Display timeslots in columns for better space utilization if many timeslots
-            num_columns = 2 # Start with 2 columns, can be adjusted
-            if len(timeslots) > 6: # Example threshold
-                 num_columns = 3
+                cols = st.columns(num_columns)
+                for i, info_md in enumerate(activity_timeslots_info):
+                    cols[i % num_columns].markdown(info_md, unsafe_allow_html=True)
 
-            cols = st.columns(num_columns)
-            for i, info_md in enumerate(activity_timeslots_info):
-                cols[i % num_columns].markdown(info_md, unsafe_allow_html=True)
-
-        st.markdown("---") # Separator between activities
+    # The main page separator st.markdown("---") after the entire availability section
+    # (before conditional display of warning/form) is kept from previous structure.
+    # No specific separator between expanders is needed unless desired for styling.
 
     # --- Conditional Display: Warning or Signup Form ---
     user_existing_registrations = dm.get_user_registrations(participant_session_id)
