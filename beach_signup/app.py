@@ -15,9 +15,20 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "password123"
 
 # Function to display the participant sign-up page
+
 def show_signup_page(participant_session_id, current_participant_profile):
     st.header("📝 Sign Up For Activities")
 
+    # Check for "1 activity limit" FIRST
+    user_existing_registrations = dm.get_user_registrations(participant_session_id)
+
+    if user_existing_registrations:
+        st.warning("You already have an active booking. You can only sign up for one activity at a time.")
+        st.info("Please visit the 'My Bookings' page (accessible from the sidebar if added to navigation) to view or cancel your current booking if you wish to sign up for a different activity.")
+        # For now, just a message. User should navigate via sidebar (once 'My Bookings' is added there).
+        return # Stop here if user already has a booking
+
+    # If no existing booking, proceed with showing signup options
     activities = dm.get_activities()
     timeslots = dm.get_timeslots()
     MAX_CAPACITY_PER_SLOT = 10
@@ -34,7 +45,7 @@ def show_signup_page(participant_session_id, current_participant_profile):
     availability_df = pd.DataFrame.from_dict(grid_data, orient='index', columns=timeslots)
 
     st.subheader("Current Availability")
-    def style_availability(val):
+    def style_availability(val): # Copied from existing working version
         color = ""
         if val == "Full": color = 'background-color: #FFCCCC'
         elif "Slots Available" in val:
@@ -45,14 +56,14 @@ def show_signup_page(participant_session_id, current_participant_profile):
     st.dataframe(availability_df.style.applymap(style_availability), use_container_width=True)
 
     st.subheader("Book Your Slot")
-    # Access participant's name by index 1 if current_participant_profile is a Row object
+    # Corrected: Access participant's name by index 1 if current_participant_profile is a Row object
     default_name = current_participant_profile[1] if current_participant_profile else ""
 
-    with st.form("registration_form"):
-        name = st.text_input("Your Full Name:", value=default_name, key="reg_form_name")
-        email = st.text_input("Your Email:", key="reg_form_email")
-        selected_activity = st.selectbox("Choose an Activity:", options=activities, key="reg_form_activity")
-        selected_timeslot = st.selectbox("Choose a Timeslot:", options=timeslots, key="reg_form_timeslot")
+    with st.form("registration_form_no_email"): # Changed form key
+        name = st.text_input("Your Full Name:", value=default_name, key="reg_form_name_v2")
+        # Email field REMOVED
+        selected_activity = st.selectbox("Choose an Activity:", options=activities, key="reg_form_activity_v2")
+        selected_timeslot = st.selectbox("Choose a Timeslot:", options=timeslots, key="reg_form_timeslot_v2")
 
         is_slot_full_check = False
         if selected_activity and selected_timeslot:
@@ -65,9 +76,7 @@ def show_signup_page(participant_session_id, current_participant_profile):
             if not ut.validate_name(name):
                 st.error("Please enter a valid name (at least 2 characters).")
                 return
-            if not ut.validate_email(email.strip()): # Use new validation
-                st.error("Please enter a valid email address.")
-                return
+            # Email validation REMOVED
 
             current_count_on_submit = dm.get_signup_count(selected_activity, selected_timeslot)
             if current_count_on_submit >= MAX_CAPACITY_PER_SLOT:
@@ -75,22 +84,27 @@ def show_signup_page(participant_session_id, current_participant_profile):
                 st.rerun()
                 return
 
-            if not current_participant_profile: # If no profile exists for this session_id, create one
+            if not current_participant_profile: # If no participant profile exists for this session_id
                 dm.create_participant(participant_session_id, name.strip())
 
-            reg_id, new_passphrase = dm.add_registration(participant_session_id, name.strip(), email.strip(), selected_activity, selected_timeslot)
+            # add_registration no longer takes email. Status messages updated in dm.py
+            reg_id, new_passphrase, status_msg = dm.add_registration(participant_session_id, name.strip(), selected_activity, selected_timeslot)
 
-            if reg_id and new_passphrase:
-                st.success(f"Success! Signed up for {selected_activity} at {selected_timeslot}.")
-                st.info(f"Your verification code: **{ut.format_passphrase_display(new_passphrase)}**")
-                st.markdown(f"A confirmation would typically be sent to **{email.strip()}** (Email sending mocked).")
+            if status_msg == "SUCCESS":
+                st.success(f"Success! You are signed up for {selected_activity} at {selected_timeslot}.")
+                st.info(f"Your unique verification code for this booking is: **{ut.format_passphrase_display(new_passphrase)}**")
+                st.warning("IMPORTANT: Do not share this passphrase with anyone. It is your unique code for check-in.") # New Warning
                 st.balloons()
-            elif not reg_id and not new_passphrase: # IntegrityError from dm.add_registration
-                 st.error(f"You are already registered for an activity in the timeslot {selected_timeslot}.")
-            else:
-                st.error("Signup failed. Please try again.")
+                st.rerun() # Rerun to trigger the "already booked" message at the top of this page.
+            elif status_msg == "LIMIT_REACHED":
+                 st.error("You already have an active booking. You can only sign up for one activity at a time. This form should have been disabled.")
+                 st.rerun() # Should refresh and disable form
+            elif status_msg == "ALREADY_BOOKED_TIMESLOT": # Should ideally be caught by LIMIT_REACHED first
+                 st.error(f"It seems you (or someone in this session) are already booked for an activity in the timeslot {selected_timeslot}, or for this specific activity/timeslot combination.")
+            else: # DB_ERROR or other unexpected
+                st.error(f"Signup failed due to an unexpected issue ({status_msg}). Please try again or contact support.")
 
-# Function to display the admin dashboard (placeholder for now)
+
 
 def show_admin_dashboard_page():
     st.header("👑 Admin Dashboard")
@@ -98,115 +112,143 @@ def show_admin_dashboard_page():
 
     admin_action = st.selectbox("Admin Actions:",
                                 ["View Activity Status & Check-In", "Verify by Passphrase & Check-In"],
-                                key="admin_main_action_select")
+                                key="admin_main_action_select_v2") # New key if needed
 
     if admin_action == "View Activity Status & Check-In":
         st.subheader("Activity Status & Registrations")
 
         activities = dm.get_activities()
-        # Add a default empty option to prevent immediate selection/loading
-        selected_activity = st.selectbox("Select Activity:", [""] + activities, key="admin_select_activity")
+        selected_activity = st.selectbox("Select Activity:", [""] + activities, key="admin_select_activity_v2")
 
-        if selected_activity: # Only proceed if an activity is chosen
+        if selected_activity:
             timeslots = dm.get_timeslots()
-            # Add a default empty option here too
-            selected_timeslot = st.selectbox("Select Timeslot:", [""] + timeslots, key="admin_select_timeslot")
+            selected_timeslot = st.selectbox("Select Timeslot:", [""] + timeslots, key="admin_select_timeslot_v2")
 
-            if selected_timeslot: # Only proceed if a timeslot is chosen
+            if selected_timeslot:
                 st.markdown(f"**Registrations for {selected_activity} at {selected_timeslot}:**")
                 registrations = dm.get_registrations_for_timeslot(selected_activity, selected_timeslot)
 
                 if not registrations:
                     st.info("No registrations for this activity/timeslot yet.")
                 else:
-                    # Prepare data for display
                     display_data = []
-                    for reg_row in registrations: # Renamed to avoid conflict with 'registrations' list
-                        # Accessing sqlite3.Row by index as per previous findings
-                        # Schema: id(0), user_id(1), participant_name(2), participant_email(3),
-                        #         activity(4), timeslot(5), registration_passphrase(6),
-                        #         registration_time(7), checked_in(8)
-                        status = "Checked-In" if reg_row[8] == 1 else "Pending" # reg_row[8] is 'checked_in'
+                    for reg in registrations: # Assuming reg is a Row object
+                        status = "Checked-In" if reg[7] == 1 else "Pending" # checked_in is index 7
                         display_data.append({
-                            "Reg ID": reg_row[0], # reg_row[0] is 'id'
-                            "Name": reg_row[2],   # reg_row[2] is 'participant_name'
-                            "Email": reg_row[3],  # reg_row[3] is 'participant_email'
-                            "Passphrase": ut.format_passphrase_display(reg_row[6]), # reg_row[6] is 'registration_passphrase'
+                            "Reg ID": reg[0],
+                            "Name": reg[2],
+                            # Email field removed from here
+                            "Passphrase": ut.format_passphrase_display(reg[5]),
                             "Status": status,
-                            "user_id_debug": reg_row[1] # reg_row[1] is 'user_id'
                         })
 
-                    cols_header = ["Name", "Email", "Passphrase", "Status", "Action"]
-                    header_cols = st.columns([2,2,2,1,1]) # Adjusted column ratios
+                    cols_header = ["Name", "Passphrase", "Status", "Action"] # Email removed from header
+                    # Adjust column ratios: Name (2), Passphrase (2), Status (1), Action (1) -> Total 6
+                    header_cols = st.columns([2, 2, 1, 1])
                     for i, col_name in enumerate(cols_header):
                         header_cols[i].markdown(f"**{col_name}**")
 
                     st.markdown("---")
 
                     for item in display_data:
-                        row_cols = st.columns([2,2,2,1,1]) # Adjusted column ratios
+                        row_cols = st.columns([2, 2, 1, 1]) # Match header column ratios
                         row_cols[0].write(item["Name"])
-                        row_cols[1].write(item["Email"])
-                        row_cols[2].write(item["Passphrase"])
+                        row_cols[1].write(item["Passphrase"]) # Passphrase is now at index 1 of display cols
 
+                        # Status is now at index 2 of display cols
                         if item["Status"] == "Checked-In":
-                            row_cols[3].success(item["Status"])
-                            row_cols[4].empty()
+                            row_cols[2].success(item["Status"])
+                            row_cols[3].empty()
                         else:
-                            row_cols[3].warning(item["Status"])
-                            button_key = f"checkin_{item['Reg ID']}"
-                            if row_cols[4].button("Check-In", key=button_key):
+                            row_cols[2].warning(item["Status"])
+                            # Action is now at index 3 of display cols
+                            button_key = f"checkin_activity_view_{item['Reg ID']}"
+                            if row_cols[3].button("Check-In", key=button_key):
                                 if dm.check_in_registration(item['Reg ID']):
                                     st.success(f"Checked in {item['Name']} (Reg ID: {item['Reg ID']}).")
                                     st.rerun()
                                 else:
-                                    st.error(f"Failed to check in {item['Name']}. They might already be checked in, or an error occurred.")
+                                    st.error(f"Failed to check in {item['Name']}.")
                         st.markdown("---")
 
     elif admin_action == "Verify by Passphrase & Check-In":
         st.subheader("Verify by Passphrase & Check-In")
 
-        with st.form("passphrase_verify_form"):
-            passphrase_input = st.text_input("Enter 4-word Registration Passphrase (e.g., word-word-word-word):", key="admin_passphrase_input")
+        with st.form("passphrase_verify_form_v2"):
+            passphrase_input = st.text_input("Enter 4-word Registration Passphrase (e.g., word-word-word-word):", key="admin_passphrase_input_v2")
             verify_button = st.form_submit_button("Verify Passphrase")
 
         if verify_button and passphrase_input:
-            # Normalize passphrase: lowercase and strip whitespace
             normalized_passphrase = passphrase_input.strip().lower()
-
-            registration = dm.get_registration_by_passphrase(normalized_passphrase) # This is a Row object or None
+            registration = dm.get_registration_by_passphrase(normalized_passphrase) # Row object
 
             if not registration:
                 st.error("Invalid or unknown passphrase. Please check the input (format: word-word-word-word).")
             else:
-                # Registrations table schema indices:
-                # id(0), user_id(1), participant_name(2), participant_email(3),
-                # activity(4), timeslot(5), registration_passphrase(6),
-                # registration_time(7), checked_in(8)
-                st.success(f"Registration Found for Passphrase: **{ut.format_passphrase_display(registration[6])}**") # registration_passphrase index 6
+                st.success(f"Registration Found for Passphrase: **{ut.format_passphrase_display(registration[5])}**") # Passphrase at index 5
 
                 details_cols = st.columns(2)
-                details_cols[0].markdown(f"**Name:** {registration[2]}") # participant_name index 2
-                details_cols[0].markdown(f"**Email:** {registration[3]}") # participant_email index 3
-                details_cols[1].markdown(f"**Activity:** {registration[4]}") # activity index 4
-                details_cols[1].markdown(f"**Timeslot:** {registration[5]}") # timeslot index 5
+                details_cols[0].markdown(f"**Name:** {registration[2]}") # Name at index 2
+                # Email display removed from here
+                details_cols[1].markdown(f"**Activity:** {registration[3]}") # Activity at index 3
+                details_cols[1].markdown(f"**Timeslot:** {registration[4]}") # Timeslot at index 4
 
                 st.markdown("---")
 
-                if registration[8] == 1: # checked_in index 8
+                if registration[7] == 1: # checked_in at index 7
                     st.warning("This participant is already checked-in.")
                 else:
                     st.info("Status: Pending Check-In")
-                    checkin_button_key = f"passphrase_checkin_{registration[0]}" # id index 0
+                    checkin_button_key = f"passphrase_checkin_verify_view_{registration[0]}" # Reg ID at index 0
                     if st.button("Check-In Participant", key=checkin_button_key, type="primary"):
-                        if dm.check_in_registration(registration[0]): # id index 0
-                            st.success(f"Successfully checked in {registration[2]} for {registration[4]}.") # name index 2, activity index 4
+                        if dm.check_in_registration(registration[0]): # Reg ID at index 0
+                            st.success(f"Successfully checked in {registration[2]} for {registration[3]}.") # Name (idx 2), Activity (idx 3)
                             st.balloons()
                             st.rerun()
                         else:
-                            st.error("Check-in failed. The participant might have been checked in by another admin, or a database error occurred.")
+                            st.error("Check-in failed.")
         elif verify_button and not passphrase_input:
             st.warning("Please enter a passphrase to verify.")
+
+
+
+
+
+def show_my_bookings_page(user_id, participant_profile):
+    st.header("My Active Booking")
+
+    if not participant_profile: # Should ideally not happen if they access this page via normal flow
+        st.warning("Please register your name on the 'Sign Up For Activities' page first if you are a new user.")
+        return
+
+    user_registrations = dm.get_user_registrations(user_id)
+
+    if not user_registrations:
+        st.info("You have no active bookings.")
+        st.write("Feel free to sign up for an activity!")
+    else:
+        # Due to the "1 activity limit", there should only be one registration.
+        current_booking = user_registrations[0]
+
+        st.subheader(f"Your booking for: {current_booking[3]}") # activity index 3
+        st.markdown(f"**Timeslot:** {current_booking[4]}") # timeslot index 4
+        st.markdown(f"**Your Name (for this booking):** {current_booking[2]}") # participant_name index 2
+
+        st.markdown("---")
+        st.subheader("Your Verification Passphrase:")
+        st.code(ut.format_passphrase_display(current_booking[5])) # registration_passphrase index 5
+        st.warning("IMPORTANT: Do not share this passphrase with anyone. It is your unique code for check-in.")
+        st.markdown("---")
+
+        if st.button("Cancel This Booking", key=f"cancel_booking_{current_booking[0]}", type="primary"): # id index 0
+            if dm.cancel_registration(current_booking[0]): # id index 0
+                st.success("Your booking has been successfully cancelled.")
+                st.info("You can now sign up for a new activity.")
+                st.balloons()
+                st.rerun() # Refresh the page to show "no active bookings"
+            else:
+                st.error("Could not cancel the booking. Please try again or contact support.")
+
 
 def initialize_user_session():
     if 'user_id' not in st.session_state:
@@ -251,7 +293,13 @@ def main():
             # Access participant's name by index 1, as per previous findings for sqlite.Row
             participant_name_display = participant_profile[1] if participant_profile else "Guest"
             st.sidebar.info(f"Welcome, {participant_name_display}!")
-            show_signup_page(user_id, participant_profile)
+            user_page_options = ["Sign Up For Activities", "My Bookings"]
+            user_action = st.sidebar.selectbox("What would you like to do?", user_page_options, key="user_action_select_v2") # New key
+
+            if user_action == "Sign Up For Activities":
+                show_signup_page(user_id, participant_profile)
+            elif user_action == "My Bookings":
+                show_my_bookings_page(user_id, participant_profile)
 
     elif app_section == "Admin Dashboard":
         st.title("🔒 Admin Dashboard")
