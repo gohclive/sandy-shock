@@ -24,28 +24,42 @@ def show_signup_page(participant_session_id, current_participant_profile):
     timeslots = dm.get_timeslots()
     MAX_CAPACITY_PER_SLOT = 10 # Define this early if not already global/class member
 
-    grid_data = {}
-    for activity_item in activities: # Renamed to avoid conflict with selected_activity later
-        row_data = {}
-        for timeslot_item in timeslots: # Renamed to avoid conflict
+    st.subheader("Current Availability")
+
+    for activity_item in activities:
+        st.markdown(f"#### {activity_item}") # Use a smaller header for each activity
+
+        activity_timeslots_info = []
+        all_slots_for_activity_full = True # Flag to see if all timeslots for this activity are full
+
+        for timeslot_item in timeslots:
             count = dm.get_signup_count(activity_item, timeslot_item)
             available_slots = MAX_CAPACITY_PER_SLOT - count
-            row_data[timeslot_item] = "Full" if available_slots <= 0 else f"{available_slots} Slots Available"
-        grid_data[activity_item] = row_data
 
-    availability_df = pd.DataFrame.from_dict(grid_data, orient='index', columns=timeslots)
+            status_text = ""
+            if available_slots <= 0:
+                status_text = f"**{timeslot_item}:** <font color='red'>Full</font>"
+            elif available_slots <= 3: # Few slots left
+                status_text = f"**{timeslot_item}:** <font color='orange'>{available_slots} Slots Available</font>"
+                all_slots_for_activity_full = False
+            else: # More than 3 slots
+                status_text = f"**{timeslot_item}:** <font color='green'>{available_slots} Slots Available</font>"
+                all_slots_for_activity_full = False
+            activity_timeslots_info.append(status_text)
 
-    st.subheader("Current Availability")
-    def style_availability(val):
-        color = ""
-        if val == "Full": color = 'background-color: #FFCCCC'
-        elif "Slots Available" in val:
-            try:
-                if int(val.split()[0]) <= 3: color = 'background-color: #FFFFCC'
-            except: pass
-        return color
-    st.dataframe(availability_df.style.applymap(style_availability), use_container_width=True)
-    st.markdown("---") # Optional: Add a separator after the grid
+        if all_slots_for_activity_full:
+             st.markdown(f"<font color='red'>All timeslots for {activity_item} are currently full.</font>", unsafe_allow_html=True)
+        else:
+            # Display timeslots in columns for better space utilization if many timeslots
+            num_columns = 2 # Start with 2 columns, can be adjusted
+            if len(timeslots) > 6: # Example threshold
+                 num_columns = 3
+
+            cols = st.columns(num_columns)
+            for i, info_md in enumerate(activity_timeslots_info):
+                cols[i % num_columns].markdown(info_md, unsafe_allow_html=True)
+
+        st.markdown("---") # Separator between activities
 
     # --- Conditional Display: Warning or Signup Form ---
     user_existing_registrations = dm.get_user_registrations(participant_session_id)
