@@ -176,9 +176,12 @@ def check_in_registration(registration_id):
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT checked_in FROM registrations WHERE id = ?", (registration_id,))
-        result = cursor.fetchone()
-        if result is None: return False
-        if result[0] == 1: return False
+        result = cursor.fetchone() # result is a Row object here
+        if result is None:
+            return False
+        # Access by key for consistency, though result[0] would also work for Row object
+        if result['checked_in'] == 1:
+            return False
         cursor.execute("UPDATE registrations SET checked_in = 1 WHERE id = ?", (registration_id,))
         conn.commit()
         return cursor.rowcount > 0

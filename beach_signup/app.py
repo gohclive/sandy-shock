@@ -91,6 +91,14 @@ def show_signup_page(participant_session_id, current_participant_profile):
             reg_id, new_passphrase, status_msg = dm.add_registration(participant_session_id, name.strip(), selected_activity, selected_timeslot)
 
             if status_msg == "SUCCESS":
+                # Store success info in session state before rerun
+                st.session_state.signup_success = True
+                st.session_state.last_signup_details = {
+                    "activity": selected_activity,
+                    "timeslot": selected_timeslot,
+                    "passphrase": new_passphrase
+                }
+                # These messages will flash briefly, persistent ones handled in main()
                 st.success(f"Success! You are signed up for {selected_activity} at {selected_timeslot}.")
                 st.info(f"Your unique verification code for this booking is: **{ut.format_passphrase_display(new_passphrase)}**")
                 st.warning("IMPORTANT: Do not share this passphrase with anyone. It is your unique code for check-in.") # New Warning
@@ -179,7 +187,8 @@ def show_admin_dashboard_page():
                             reg_id = registrations_df.loc[i, "Reg ID"] # Or edited_df, "Reg ID" is not editable
 
                             if not original_status and edited_status: # Changed from False to True
-                                if dm.check_in_registration(reg_id):
+                                # Ensure reg_id is an integer before passing
+                                if dm.check_in_registration(int(reg_id)):
                                     st.success(f"Checked in participant with Reg ID: {reg_id}.")
                                 else:
                                     st.error(f"Failed to check in participant with Reg ID: {reg_id}.")
@@ -292,6 +301,23 @@ def main():
     app_section = st.sidebar.radio("Navigate:", ["User Section", "Admin Dashboard"], key="main_nav")
 
     if app_section == "User Section":
+        # Display persistent signup success message if available
+        if st.session_state.get('signup_success'):
+            details = st.session_state.get('last_signup_details', {})
+            if details: # Check if details exist
+                st.success(f"Success! You are signed up for {details.get('activity', 'N/A')} at {details.get('timeslot', 'N/A')}.")
+                st.info(f"Your unique verification code for this booking is: **{ut.format_passphrase_display(details.get('passphrase', ''))}**")
+                st.warning("IMPORTANT: Do not share this passphrase with anyone. It is your unique code for check-in.")
+                st.balloons() # Show balloons again with the persistent message
+            else:
+                # Fallback if details somehow got lost, though unlikely with this logic
+                st.success("Signup successful! Your registration details are available in 'My Bookings'.")
+
+            # Clear the flag and details to prevent re-displaying on next interaction/rerun
+            del st.session_state.signup_success
+            if 'last_signup_details' in st.session_state:
+                del st.session_state.last_signup_details
+
         st.title("🏖️ Beach Day Activity Signup")
         st.sidebar.subheader("User Actions")
         # participant_profile is still fetched
