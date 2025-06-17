@@ -19,33 +19,24 @@ ADMIN_PASSWORD = st.secrets["admin"]["password"]
 def show_signup_page(participant_session_id, current_participant_profile):
     st.header("📝 Sign Up For Activities")
 
-    # Check for "1 activity limit" FIRST
-    user_existing_registrations = dm.get_user_registrations(participant_session_id)
-
-    if user_existing_registrations:
-        st.warning("You already have an active booking. You can only sign up for one activity at a time.")
-        st.info("Please visit the 'My Bookings' page (accessible from the sidebar if added to navigation) to view or cancel your current booking if you wish to sign up for a different activity.")
-        # For now, just a message. User should navigate via sidebar (once 'My Bookings' is added there).
-        return # Stop here if user already has a booking
-
-    # If no existing booking, proceed with showing signup options
+    # --- Display Activity Availability Grid (Moved Up) ---
     activities = dm.get_activities()
     timeslots = dm.get_timeslots()
-    MAX_CAPACITY_PER_SLOT = 10
+    MAX_CAPACITY_PER_SLOT = 10 # Define this early if not already global/class member
 
     grid_data = {}
-    for activity in activities:
+    for activity_item in activities: # Renamed to avoid conflict with selected_activity later
         row_data = {}
-        for timeslot in timeslots:
-            count = dm.get_signup_count(activity, timeslot)
+        for timeslot_item in timeslots: # Renamed to avoid conflict
+            count = dm.get_signup_count(activity_item, timeslot_item)
             available_slots = MAX_CAPACITY_PER_SLOT - count
-            row_data[timeslot] = "Full" if available_slots <= 0 else f"{available_slots} Slots Available"
-        grid_data[activity] = row_data
+            row_data[timeslot_item] = "Full" if available_slots <= 0 else f"{available_slots} Slots Available"
+        grid_data[activity_item] = row_data
 
     availability_df = pd.DataFrame.from_dict(grid_data, orient='index', columns=timeslots)
 
     st.subheader("Current Availability")
-    def style_availability(val): # Copied from existing working version
+    def style_availability(val):
         color = ""
         if val == "Full": color = 'background-color: #FFCCCC'
         elif "Slots Available" in val:
@@ -54,63 +45,71 @@ def show_signup_page(participant_session_id, current_participant_profile):
             except: pass
         return color
     st.dataframe(availability_df.style.applymap(style_availability), use_container_width=True)
+    st.markdown("---") # Optional: Add a separator after the grid
 
-    st.subheader("Book Your Slot")
-    # Access participant's name by key 'name'
-    default_name = current_participant_profile['name'] if current_participant_profile else ""
+    # --- Conditional Display: Warning or Signup Form ---
+    user_existing_registrations = dm.get_user_registrations(participant_session_id)
 
-    with st.form("registration_form_no_email"): # Changed form key
-        name = st.text_input("Your Full Name:", value=default_name, key="reg_form_name_v2")
-        # Email field REMOVED
-        selected_activity = st.selectbox("Choose an Activity:", options=activities, key="reg_form_activity_v2")
-        selected_timeslot = st.selectbox("Choose a Timeslot:", options=timeslots, key="reg_form_timeslot_v2")
+    if user_existing_registrations:
+        st.warning("You already have an active booking. You can only sign up for one activity at a time.")
+        st.info("Please visit the 'My Bookings' page (accessible from the sidebar if added to navigation) to view or cancel your current booking if you wish to sign up for a different activity.")
+        # Note: The 'return' statement that was here is removed.
+    else:
+        # Show signup form only if no existing booking
+        st.subheader("Book Your Slot")
+        default_name = current_participant_profile['name'] if current_participant_profile else ""
 
-        is_slot_full_check = False
-        if selected_activity and selected_timeslot:
-            if dm.get_signup_count(selected_activity, selected_timeslot) >= MAX_CAPACITY_PER_SLOT:
-                is_slot_full_check = True
+        with st.form("registration_form_no_email"): # Changed form key
+            name = st.text_input("Your Full Name:", value=default_name, key="reg_form_name_v2")
+            # 'activities' and 'timeslots' are already defined from the grid display part
+            selected_activity = st.selectbox("Choose an Activity:", options=activities, key="reg_form_activity_v2")
+            selected_timeslot = st.selectbox("Choose a Timeslot:", options=timeslots, key="reg_form_timeslot_v2")
 
-        submit_button = st.form_submit_button("Sign Up", disabled=is_slot_full_check)
+            is_slot_full_check = False
+            if selected_activity and selected_timeslot:
+                if dm.get_signup_count(selected_activity, selected_timeslot) >= MAX_CAPACITY_PER_SLOT:
+                    is_slot_full_check = True
 
-        if submit_button:
-            if not ut.validate_name(name):
-                st.error("Please enter a valid name (at least 2 characters).")
-                return
-            # Email validation REMOVED
+            submit_button = st.form_submit_button("Sign Up", disabled=is_slot_full_check)
 
-            current_count_on_submit = dm.get_signup_count(selected_activity, selected_timeslot)
-            if current_count_on_submit >= MAX_CAPACITY_PER_SLOT:
-                st.error(f"Sorry, {selected_activity} at {selected_timeslot} just became full.")
-                st.rerun()
-                return
+            if submit_button:
+                if not ut.validate_name(name):
+                    st.error("Please enter a valid name (at least 2 characters).")
+                    return # Return from form submission if invalid
 
-            if not current_participant_profile: # If no participant profile exists for this session_id
-                dm.create_participant(participant_session_id, name.strip())
+                current_count_on_submit = dm.get_signup_count(selected_activity, selected_timeslot)
+                if current_count_on_submit >= MAX_CAPACITY_PER_SLOT:
+                    st.error(f"Sorry, {selected_activity} at {selected_timeslot} just became full.")
+                    st.rerun()
+                    return
 
-            # add_registration no longer takes email. Status messages updated in dm.py
-            reg_id, new_passphrase, status_msg = dm.add_registration(participant_session_id, name.strip(), selected_activity, selected_timeslot)
+                if not current_participant_profile: # If no participant profile exists for this session_id
+                    dm.create_participant(participant_session_id, name.strip())
 
-            if status_msg == "SUCCESS":
-                # Store success info in session state before rerun
-                st.session_state.signup_success = True
-                st.session_state.last_signup_details = {
-                    "activity": selected_activity,
-                    "timeslot": selected_timeslot,
-                    "passphrase": new_passphrase
-                }
-                # These messages will flash briefly, persistent ones handled in main()
-                st.success(f"Success! You are signed up for {selected_activity} at {selected_timeslot}.")
-                st.info(f"Your unique verification code for this booking is: **{ut.format_passphrase_display(new_passphrase)}**")
-                st.warning("IMPORTANT: Do not share this passphrase with anyone. It is your unique code for check-in.") # New Warning
-                st.balloons()
-                st.rerun() # Rerun to trigger the "already booked" message at the top of this page.
-            elif status_msg == "LIMIT_REACHED":
-                 st.error("You already have an active booking. You can only sign up for one activity at a time. This form should have been disabled.")
-                 st.rerun() # Should refresh and disable form
-            elif status_msg == "ALREADY_BOOKED_TIMESLOT": # Should ideally be caught by LIMIT_REACHED first
-                 st.error(f"It seems you (or someone in this session) are already booked for an activity in the timeslot {selected_timeslot}, or for this specific activity/timeslot combination.")
-            else: # DB_ERROR or other unexpected
-                st.error(f"Signup failed due to an unexpected issue ({status_msg}). Please try again or contact support.")
+                # add_registration no longer takes email. Status messages updated in dm.py
+                reg_id, new_passphrase, status_msg = dm.add_registration(participant_session_id, name.strip(), selected_activity, selected_timeslot)
+
+                if status_msg == "SUCCESS":
+                    # Store success info in session state before rerun
+                    st.session_state.signup_success = True
+                    st.session_state.last_signup_details = {
+                        "activity": selected_activity,
+                        "timeslot": selected_timeslot,
+                        "passphrase": new_passphrase
+                    }
+                    # These messages will flash briefly, persistent ones handled in main()
+                    st.success(f"Success! You are signed up for {selected_activity} at {selected_timeslot}.")
+                    st.info(f"Your unique verification code for this booking is: **{ut.format_passphrase_display(new_passphrase)}**")
+                    st.warning("IMPORTANT: Do not share this passphrase with anyone. It is your unique code for check-in.") # New Warning
+                    st.balloons()
+                    st.rerun() # Rerun to trigger the "already booked" message at the top of this page.
+                elif status_msg == "LIMIT_REACHED":
+                     st.error("You already have an active booking. This form should not have been available.") # Adjusted message
+                     st.rerun() # Should refresh and disable form
+                elif status_msg == "ALREADY_BOOKED_TIMESLOT": # Should ideally be caught by LIMIT_REACHED first
+                     st.error(f"It seems this specific slot ({selected_activity} at {selected_timeslot}) was booked by you in another session or there was a conflict.")
+                else: # DB_ERROR or other unexpected
+                    st.error(f"Signup failed due to an unexpected issue ({status_msg}). Please try again or contact support.")
 
 
 
