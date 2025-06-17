@@ -2,38 +2,80 @@
 
 This application allows participants to sign up for various beach day activities. It features unique passphrases for each registration for on-site verification and an admin dashboard for staff to manage activities and check-in participants.
 
+## Recent Enhancements
+
+The application has been significantly updated with the following improvements:
+
+**User Experience & Workflow:**
+- **Streamlined Onboarding:** The initial name registration and activity signup are now combined into a single, smoother step for new users.
+- **"My Registrations" View:** Users can now easily view a list of all activities they are currently signed up for via an expander in the user section.
+
+**Admin Dashboard:**
+- **Interactive Registration Grid:** The admin view for registrations per activity/timeslot now uses an interactive data editor. Admins can directly check-in participants by toggling a checkbox in the grid.
+- **Metrics Overview:** The admin dashboard now displays key metrics at a glance: "Total Registrations," "Participants Checked-In," and "Check-In Rate (%)."
+
+**Code Quality & Security:**
+- **Secure Admin Credentials:** Hardcoded admin credentials have been removed. The application now uses Streamlit Secrets (`st.secrets`). See the "Setup for Admin Credentials" section for configuration.
+- **Robust Data Access:** Internal data handling has been refactored to use dictionary-based access, making the code more readable and maintainable.
+
 ## Features
 
 **Participant Flow:**
 - **Activity Viewing:** See a list of available activities and their timeslots.
 - **Availability:** Timeslots display the number of available slots remaining or "Full".
-- **Sign-Up:** Users provide their Name and Email to register for an activity in an available timeslot.
+- **Sign-Up:** Users provide their Name to register for an activity in an available timeslot. (Email field has been removed for simplicity).
 - **Unique Passphrase:** Upon successful registration, a unique 4-word passphrase is generated for that specific booking. This acts as a "ticket" for check-in.
-- **Confirmation:** On-screen confirmation displays the activity, time, and the unique passphrase. Email confirmation is currently mocked.
+- **Confirmation:** On-screen confirmation displays the activity, time, and the unique passphrase.
 
-**Admin Dashboard (Planned & Partially Implemented):**
-- **Secure Access:** Intended to be a password-protected section for staff. (Hardcoded credentials for current version).
+**Admin Dashboard:**
+- **Secure Access:** Password-protected section for staff, configured via Streamlit Secrets.
+- **Metrics Overview:** Displays "Total Registrations," "Participants Checked-In," and "Check-In Rate (%)."
 - **Activity Management:** View all activities and drill down to see registrations per timeslot.
-- **Participant List:** For each timeslot, view a list of registered participants including their name, email, unique registration passphrase, and check-in status.
-- **On-Site Verification:**
-    - **Primary:** Staff can verify and check-in participants by searching for their unique registration passphrase.
-    - **Fallback:** Staff can manually find and check-in participants by name within the activity/timeslot view.
-- **Check-In:** Marking a participant as "Checked-In" prevents reuse of the same registration passphrase for check-in.
+- **Participant List & Check-In (Grid View):** For each timeslot, view a list of registered participants. Admins can directly check-in participants using an interactive grid.
+- **On-Site Verification (Passphrase View):**
+    - Staff can verify and check-in participants by searching for their unique registration passphrase.
+
+## Setup for Admin Credentials (Using Streamlit Secrets)
+
+Admin credentials are now managed using Streamlit Secrets for improved security. To configure:
+
+1.  **Create `secrets.toml` file:**
+    *   In the root directory of your project (the same directory that contains the `beach_signup` folder), create a new folder named `.streamlit`.
+    *   Inside the `.streamlit` folder, create a new file named `secrets.toml`.
+
+2.  **Add credentials to `secrets.toml`:**
+    Open `secrets.toml` and add the following content:
+    ```toml
+    [admin]
+    username = "your_admin_username"  # Replace with your desired admin username
+    password = "your_admin_password"  # Replace with your desired admin password
+    ```
+    *(For development, you can use `admin` and `password123` as example values, but choose strong credentials for any real deployment).*
+
+3.  **Add `secrets.toml` to `.gitignore`:**
+    Ensure that your secrets file is not committed to your Git repository. Add the following line to your `.gitignore` file (create one in the project root if it doesn't exist):
+    ```
+    .streamlit/secrets.toml
+    ```
+The application will automatically pick up these credentials when run.
 
 ## Technical Design & Considerations
 
 - **Frontend:** Streamlit
 - **Data Persistence:** SQLite (`beach_day.db` created in the `beach_signup` directory).
 - **User Session Identification:** A unique `user_id` (generated UUID fragment like `beach_xxxxxxx`) is stored in `st.session_state` and persisted in the URL via query parameters (`?uid=...`). This `user_id` links multiple registrations made during the same browser session by an individual.
-- **Participant Profile:** When a user first provides their name for a registration within a session, a basic participant profile (session `user_id`, `name`) is created. This name is then pre-filled for subsequent registrations within the same session.
-- **Per-Registration Passphrases:** Each individual booking (a specific user for a specific activity at a specific time) gets its own unique 4-word passphrase from `words.txt`. This is a key change from a per-participant passphrase system.
-- **Admin Credentials:** Currently planned to be hardcoded constants in `app.py` (`ADMIN_USERNAME`, `ADMIN_PASSWORD`).
-- **Email Confirmation:** Functionality is mocked. In a production environment, this would integrate with an email sending service (e.g., SendGrid, AWS SES, or an SMTP server).
-- **Error Handling:** Basic error messages are provided for common issues like invalid input, full slots, or duplicate bookings for the same timeslot by the same user.
+- **Participant Profile:** When a user first signs up for an activity, their name is captured. If they have no existing profile for their session `user_id`, one is created. This name is then pre-filled for subsequent activity signups within the same session.
+- **Per-Registration Passphrases:** Each individual booking (a specific user for a specific activity at a specific time) gets its own unique 4-word passphrase from `words.txt`.
+- **Admin Credentials:** Managed via Streamlit Secrets (`st.secrets["admin"]["username"]`, `st.secrets["admin"]["password"]`). See "Setup for Admin Credentials" section.
+- **Email Confirmation:** Functionality is currently not implemented (email field was removed for simplicity).
+- **Error Handling:** Basic error messages are provided for common issues like invalid input, full slots, or duplicate bookings by the same user.
+- **Data Access:** Functions in `data_manager.py` now return dictionaries instead of `sqlite3.Row` objects, and `app.py` uses dictionary key-based access.
 
 ## Project Structure
 
 ```
+.streamlit/
+└── secrets.toml       # For admin credentials (user-created, add to .gitignore)
 beach_signup/
 ├── app.py                 # Main Streamlit application
 ├── data_manager.py        # SQLite database interactions
@@ -41,6 +83,7 @@ beach_signup/
 ├── words.txt              # Word list for passphrases
 ├── beach_day.db           # SQLite database file (created on first run)
 └── README.md              # This file
+.gitignore                 # Should contain .streamlit/secrets.toml
 ```
 
 ## Setup and Installation
@@ -51,7 +94,8 @@ beach_signup/
     ```bash
     pip install streamlit pandas
     ```
-    *(Pandas is used for displaying the availability grid).*
+    *(Pandas is used for the admin data grid and activity availability display).*
+3.  **Configure Admin Credentials:** Follow the steps in the "Setup for Admin Credentials (Using Streamlit Secrets)" section.
 
 ## How to Run the Application
 
@@ -64,11 +108,14 @@ beach_signup/
 
 ## Current Implementation Status
 
-- **Data Layer (`data_manager.py`):** Fully implemented with the new schema (participants, registrations), per-registration passphrases, and all necessary data access functions.
-- **Utility Functions (`utils.py`):** Includes helpers for name validation, email validation, and passphrase formatting.
-- **Participant Signup Flow (`show_signup_page` in `app.py`):** Fully implemented. Collects Name/Email, uses new data manager functions, and displays per-registration passphrases.
+- **Data Layer (`data_manager.py`):** Fully implemented with the schema (participants, registrations), per-registration passphrases, and all necessary data access functions (returning dictionaries).
+- **Utility Functions (`utils.py`):** Includes helpers for name validation and passphrase formatting. (Email validation removed as email field is no longer used).
+- **Participant Signup Flow (`show_signup_page` in `app.py`):** Fully implemented. Collects Name, uses new data manager functions, and displays per-registration passphrases. Onboarding is streamlined.
+- **User "My Registrations" View:** Implemented.
 - **Admin Dashboard & Login (`app.py`):**
-    - Admin login/logout mechanism is implemented (using hardcoded credentials).
-    - **Activity/Timeslot View:** Implemented. Admins can view registrations by activity/timeslot and check-in participants.
-    - **Passphrase Verification View:** Implemented. Admins can search for a registration by its unique passphrase and check-in the participant.
+    - Admin login/logout mechanism is implemented (using Streamlit Secrets).
+    - **Metrics Overview:** Implemented.
+    - **Activity/Timeslot View & Check-in:** Implemented using an interactive `st.data_editor` grid.
+    - **Passphrase Verification View:** Implemented.
 - **User Session Management:** Implemented using URL parameters (`?uid=...`) and `st.session_state`.
+- **Code Quality:** Data access refactored for dictionary usage.
