@@ -147,6 +147,23 @@ def show_admin_dashboard_page():
         selected_activity = st.selectbox("Select Activity:", [""] + activities, key="admin_select_activity_v2")
 
         if selected_activity:
+            # --- Per-Activity Metrics ---
+            st.markdown(f"### Statistics for {selected_activity}") # Subheader for activity stats
+            activity_total_regs = dm.get_total_registration_count_for_activity(selected_activity)
+            activity_checked_in = dm.get_checked_in_count_for_activity(selected_activity)
+
+            if activity_total_regs > 0:
+                activity_check_in_rate = (activity_checked_in / activity_total_regs) * 100
+            else:
+                activity_check_in_rate = 0
+
+            act_col1, act_col2, act_col3 = st.columns(3)
+            act_col1.metric(f"Total Registrations ({selected_activity})", activity_total_regs)
+            act_col2.metric(f"Checked-In ({selected_activity})", activity_checked_in)
+            act_col3.metric(f"Check-In Rate ({selected_activity})", f"{activity_check_in_rate:.2f}%")
+            st.markdown("---") # Visual separator
+            # --- End Per-Activity Metrics ---
+
             timeslots = dm.get_timeslots()
             selected_timeslot = st.selectbox("Select Timeslot:", [""] + timeslots, key="admin_select_timeslot_v2")
 
@@ -188,11 +205,19 @@ def show_admin_dashboard_page():
 
                             if not original_status and edited_status: # Changed from False to True
                                 # Ensure reg_id is an integer before passing
+                                # Ensure reg_id is an integer before passing
                                 if dm.check_in_registration(int(reg_id)):
                                     st.success(f"Checked in participant with Reg ID: {reg_id}.")
                                 else:
                                     st.error(f"Failed to check in participant with Reg ID: {reg_id}.")
                                 st.rerun() # Rerun after the first successful check-in
+                            # Add new logic here for unchecking
+                            elif original_status and not edited_status: # Changed from True to False (Uncheck)
+                                if dm.uncheck_in_registration(int(reg_id)):
+                                    st.success(f"Unchecked participant with Reg ID: {reg_id}.")
+                                else:
+                                    st.error(f"Failed to uncheck participant with Reg ID: {reg_id}.")
+                                st.rerun()
                     else:
                         st.info("No registrations data to display in editor.")
 

@@ -190,6 +190,38 @@ def check_in_registration(registration_id):
         return False
     finally: conn.close()
 
+def uncheck_in_registration(registration_id):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        # Optional: Check if the registration exists and is currently checked in
+        # cursor.execute("SELECT checked_in FROM registrations WHERE id = ?", (registration_id,))
+        # result = cursor.fetchone()
+        # if result is None:
+        #     print(f"Registration ID {registration_id} not found for uncheck.")
+        #     return False
+        # if result['checked_in'] == 0:
+        #     print(f"Registration ID {registration_id} is already not checked in.")
+        #     return True # Or False, depending on desired behavior for already unchecked
+
+        cursor.execute("UPDATE registrations SET checked_in = 0 WHERE id = ?", (registration_id,))
+        conn.commit()
+        if cursor.rowcount > 0:
+            # print(f"Successfully unchecked registration ID {registration_id}.")
+            return True
+        else:
+            # This might happen if the registration_id doesn't exist,
+            # or if the status was already 0 (so no rows were changed by UPDATE).
+            # To differentiate, one might need the SELECT check above.
+            # For now, simply returning rowcount > 0 is fine.
+            # print(f"No rows updated for uncheck of registration ID {registration_id}. May not exist or already unchecked.")
+            return False # Consider if this should be True if already 0. Let's go with False if no update occurred.
+    except sqlite3.Error as e:
+        print(f"Database error in uncheck_in_registration for ID {registration_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
 def get_registrations_for_timeslot(activity, timeslot):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -221,6 +253,32 @@ def get_checked_in_count():
     count = cursor.fetchone()[0]
     conn.close()
     return count
+
+def get_total_registration_count_for_activity(activity):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM registrations WHERE activity = ?", (activity,))
+        count = cursor.fetchone()[0] # sqlite3.Row will allow index access here
+        return count
+    except sqlite3.Error as e:
+        print(f"Database error in get_total_registration_count_for_activity for {activity}: {e}")
+        return 0 # Return 0 in case of error
+    finally:
+        conn.close()
+
+def get_checked_in_count_for_activity(activity):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM registrations WHERE checked_in = 1 AND activity = ?", (activity,))
+        count = cursor.fetchone()[0] # sqlite3.Row will allow index access here
+        return count
+    except sqlite3.Error as e:
+        print(f"Database error in get_checked_in_count_for_activity for {activity}: {e}")
+        return 0 # Return 0 in case of error
+    finally:
+        conn.close()
 
 def get_activities():
     return ["Beach Volleyball", "Surfing Lessons", "Sandcastle Building", "Beach Photography", "Sunset Yoga"]
