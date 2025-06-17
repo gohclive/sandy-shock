@@ -98,7 +98,7 @@ def find_participant_by_id(user_id):
     cursor.execute("SELECT * FROM participants WHERE id = ?", (user_id,))
     participant = cursor.fetchone()
     conn.close()
-    return participant
+    return dict(participant) if participant else None
 
 def get_user_registrations(user_id): # Crucial for the 1-activity limit and "My Bookings"
     conn = get_db_connection()
@@ -106,7 +106,7 @@ def get_user_registrations(user_id): # Crucial for the 1-activity limit and "My 
     cursor.execute("SELECT * FROM registrations WHERE user_id = ? ORDER BY registration_time DESC", (user_id,))
     registrations = cursor.fetchall()
     conn.close()
-    return registrations
+    return [dict(reg) for reg in registrations]
 
 # add_registration now implements the "1 activity per user" limit
 def add_registration(user_id, name, activity, timeslot):
@@ -169,7 +169,7 @@ def get_registration_by_passphrase(passphrase):
     cursor.execute("SELECT * FROM registrations WHERE registration_passphrase = ?", (passphrase,))
     registration = cursor.fetchone()
     conn.close()
-    return registration
+    return dict(registration) if registration else None
 
 def check_in_registration(registration_id):
     conn = get_db_connection()
@@ -193,7 +193,31 @@ def get_registrations_for_timeslot(activity, timeslot):
     cursor.execute("SELECT * FROM registrations WHERE activity = ? AND timeslot = ? ORDER BY registration_time", (activity, timeslot))
     registrations = cursor.fetchall()
     conn.close()
-    return registrations
+    return [dict(reg) for reg in registrations]
+
+def get_registrations_for_participant(participant_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM registrations WHERE user_id = ?", (participant_id,))
+    registrations = cursor.fetchall()
+    conn.close()
+    return [dict(reg) for reg in registrations]
+
+def get_total_registration_count():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM registrations")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+def get_checked_in_count():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM registrations WHERE checked_in = 1")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
 
 def get_activities():
     return ["Beach Volleyball", "Surfing Lessons", "Sandcastle Building", "Beach Photography", "Sunset Yoga"]
