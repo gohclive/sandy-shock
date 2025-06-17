@@ -186,6 +186,10 @@ def display_user_portal():
 
     st.title("🏖️ User Portal") # Or "Beach Day Activity Signup"
     st.sidebar.subheader("User Actions")
+    st.sidebar.caption(
+        "Tip: Your session is unique to this URL. "
+        "Bookmark this page to easily return to your activities and bookings."
+    )
 
     if participant_profile:
         participant_name_display = participant_profile['name'] if participant_profile else "Guest"
