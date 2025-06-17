@@ -1,120 +1,116 @@
 import sqlite3
-import os # Ensure os is imported
+import os
 import random
 from datetime import datetime
 
 DB_FILE = "beach_day.db"
 
 def get_db_connection():
-    """Establishes a connection to the SQLite database."""
-    conn = sqlite3.connect(DB_FILE)
+    db_path = os.path.join(os.path.dirname(__file__), DB_FILE)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 def load_word_list():
-    """Load words for passphrase generation from words.txt."""
-    # Correctly locate words.txt relative to this file (data_manager.py)
     word_file_path = os.path.join(os.path.dirname(__file__), 'words.txt')
     try:
         with open(word_file_path, 'r') as f:
-            return [word.strip().lower() for word in f.readlines() if word.strip()]
+            words = [word.strip().lower() for word in f.readlines() if word.strip() and len(word.strip()) >= 3]
+            if not words: raise FileNotFoundError
+            return words
     except FileNotFoundError:
-        print(f"Warning: {word_file_path} not found. Using fallback word list.")
-        return ['apple', 'beach', 'happy', 'ocean', 'sunny', 'wave', 'blue', 'sky', 'sand', 'fun']
+        print(f"Warning: {word_file_path} not found or empty. Using fallback word list.")
+        return ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima']
 
-def generate_unique_passphrase(conn):
-    """Generates a 4-word passphrase that is guaranteed to be unique in the DB."""
+def generate_registration_passphrase(conn):
     words = load_word_list()
-    if len(words) < 4:
-        print("Error: Word list is too small. Using simplified fallback.")
-        # Simplified fallback for this edge case
-        base_passphrase_parts = ['default', 'pass', 'phrase', 'unique']
-        # Ensure we use 4 parts, even if it means repetition (less ideal)
-        while len(base_passphrase_parts) < 4:
-            base_passphrase_parts.append('word')
-        current_passphrase = '-'.join(random.sample(base_passphrase_parts, 4) if len(set(base_passphrase_parts)) >=4 else base_passphrase_parts[:4])
-
-        cursor = conn.cursor()
-        suffix = 0
-        while True:
-            passphrase_to_check = f"{current_passphrase}{'-'+str(suffix) if suffix > 0 else ''}"
-            cursor.execute("SELECT 1 FROM participants WHERE passphrase = ?", (passphrase_to_check,))
-            if cursor.fetchone() is None:
-                return passphrase_to_check
-            suffix += 1
-        # This line should ideally not be reached if the loop above works.
-        # However, as a very last resort, to prevent an infinite loop in an unexpected scenario:
-        # return f"fallback-error-{random.randint(1000,9999)}"
-
-
     cursor = conn.cursor()
+
+    if len(words) < 4:
+        print("Error: Word list too small. Using numbered fallback passphrases.")
+        # Fallback for critically small word list
+        idx = 1
+        while True:
+            passphrase = f"reg-code-{idx}" # Simple but unique
+            cursor.execute("SELECT 1 FROM registrations WHERE registration_passphrase = ?", (passphrase,))
+            if cursor.fetchone() is None:
+                return passphrase
+            idx += 1
+
+    # Main logic
     attempts = 0
-    max_attempts = 200 # Increased attempts
+    max_attempts = 300 # Increased attempts for very busy systems
     while attempts < max_attempts:
         passphrase = '-'.join(random.sample(words, 4))
-        cursor.execute("SELECT 1 FROM participants WHERE passphrase = ?", (passphrase,))
+        cursor.execute("SELECT 1 FROM registrations WHERE registration_passphrase = ?", (passphrase,))
         if cursor.fetchone() is None:
             return passphrase
         attempts += 1
 
-    print(f"Warning: Could not generate a unique passphrase from primary list after {max_attempts} attempts. Appending suffix.")
-    # Fallback to a suffixed passphrase to ensure uniqueness if many collisions occur
-    # This could happen if the word list is small and many passphrases are already in the DB
-    passphrase_base = '-'.join(random.sample(words,4)) # Generate a base one more time
+    # Absolute fallback if many collisions (should be extremely rare)
+    print(f"Warning: High collision rate after {max_attempts} attempts. Using suffixed passphrase.")
+    base_passphrase = '-'.join(random.sample(words,4)) if words else "fallback-pass" # Ensure words exist
     suffix = 1
-    while True: # Loop indefinitely until a unique one is found (DB constraint will eventually be met)
-        new_passphrase = f"{passphrase_base}-{suffix}"
-        cursor.execute("SELECT 1 FROM participants WHERE passphrase = ?", (new_passphrase,))
+    while True:
+        new_passphrase = f"{base_passphrase}-{suffix}"
+        cursor.execute("SELECT 1 FROM registrations WHERE registration_passphrase = ?", (new_passphrase,))
         if cursor.fetchone() is None:
             return new_passphrase
         suffix += 1
 
-
 def initialize_database():
-    """Creates the database and tables if they don't exist."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Participants table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS participants (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            passphrase TEXT NOT NULL UNIQUE,
             created_time TEXT NOT NULL
         )
     ''')
-    # Signups table
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS signups (
-            participant_id TEXT,
+        CREATE TABLE IF NOT EXISTS registrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            participant_name TEXT NOT NULL,
+            participant_email TEXT NOT NULL,
             activity TEXT NOT NULL,
             timeslot TEXT NOT NULL,
-            FOREIGN KEY (participant_id) REFERENCES participants (id),
-            PRIMARY KEY (participant_id, timeslot)
+            registration_passphrase TEXT NOT NULL UNIQUE,
+            registration_time TEXT NOT NULL,
+            checked_in INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES participants (id),
+            UNIQUE (user_id, activity, timeslot)
         )
     ''')
     conn.commit()
     conn.close()
 
 def create_participant(user_id, name):
-    """Creates a new participant record and returns their generated passphrase."""
+    """Creates a new participant record if one doesn't exist for this user_id."""
     conn = get_db_connection()
-    # generate_unique_passphrase now requires the connection to be passed
-    passphrase = generate_unique_passphrase(conn)
-    created_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     try:
+        # Check if participant already exists to avoid error on primary key conflict
         cursor = conn.cursor()
+        cursor.execute("SELECT id FROM participants WHERE id = ?", (user_id,))
+        if cursor.fetchone():
+            # Participant already exists, perhaps update name or just return
+            # For now, let's assume name doesn't change once set or this is handled in app logic
+            print(f"Participant {user_id} already exists.")
+            return True # Or some indicator that it's fine
+
+        created_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute(
-            "INSERT INTO participants (id, name, passphrase, created_time) VALUES (?, ?, ?, ?)",
-            (user_id, name, passphrase, created_time)
+            "INSERT INTO participants (id, name, created_time) VALUES (?, ?, ?)",
+            (user_id, name, created_time)
         )
         conn.commit()
+        return True
     except sqlite3.Error as e:
         print(f"Database error in create_participant: {e}")
-        conn.close() # Ensure connection is closed on error too
-        return None # Indicate failure
-    conn.close()
-    return passphrase
+        return False
+    finally:
+        conn.close()
 
 def find_participant_by_id(user_id):
     """Finds a participant by their user_id."""
@@ -125,90 +121,114 @@ def find_participant_by_id(user_id):
     conn.close()
     return participant
 
+def add_registration(user_id, name, email, activity, timeslot):
+    """Adds a new registration and returns (registration_id, passphrase) or (None, None)."""
+    conn = get_db_connection()
+    try:
+        passphrase = generate_registration_passphrase(conn)
+        reg_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO registrations (user_id, participant_name, participant_email, activity, timeslot, registration_passphrase, registration_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, name, email, activity, timeslot, passphrase, reg_time)
+        )
+        registration_id = cursor.lastrowid
+        conn.commit()
+        return registration_id, passphrase
+    except sqlite3.IntegrityError as e: # Handles UNIQUE constraint violations
+        print(f"Integrity error in add_registration (likely user already booked this slot): {e}")
+        return None, None
+    except sqlite3.Error as e:
+        print(f"Database error in add_registration: {e}")
+        return None, None
+    finally:
+        conn.close()
+
+def get_signup_count(activity, timeslot):
+    """Counts current active (not cancelled) signups for a specific activity/timeslot."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Assuming registrations are permanent once made, unless explicitly cancelled by a mechanism not yet defined in this table directly
+    # If cancellations mean deleting rows, then COUNT(*) is fine.
+    cursor.execute("SELECT COUNT(*) FROM registrations WHERE activity = ? AND timeslot = ?", (activity, timeslot))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+def get_user_registrations(user_id):
+    """Gets all registrations for a specific user_id."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM registrations WHERE user_id = ? ORDER BY registration_time DESC", (user_id,))
+    registrations = cursor.fetchall()
+    conn.close()
+    return registrations
+
+def cancel_registration(registration_id):
+    """Removes a registration by its ID. Returns True if successful."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM registrations WHERE id = ?", (registration_id,))
+        conn.commit()
+        return cursor.rowcount > 0 # True if a row was deleted
+    except sqlite3.Error as e:
+        print(f"Database error in cancel_registration: {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_registration_by_passphrase(passphrase):
+    """Fetches a registration by its unique registration_passphrase."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM registrations WHERE registration_passphrase = ?", (passphrase,))
+    registration = cursor.fetchone()
+    conn.close()
+    return registration
+
+def check_in_registration(registration_id):
+    """Marks a registration as checked_in. Returns True if successful, False if already checked_in or not found."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT checked_in FROM registrations WHERE id = ?", (registration_id,))
+        result = cursor.fetchone()
+        if result is None:
+            return False # Not found
+        if result['checked_in'] == 1:
+            return False # Already checked in
+
+        cursor.execute("UPDATE registrations SET checked_in = 1 WHERE id = ?", (registration_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        print(f"Database error in check_in_registration: {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_registrations_for_timeslot(activity, timeslot):
+    """Fetches all registrations for a specific activity and timeslot for admin view."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM registrations WHERE activity = ? AND timeslot = ? ORDER BY registration_time", (activity, timeslot))
+    registrations = cursor.fetchall()
+    conn.close()
+    return registrations
+
 def get_activities():
-    """Returns the list of 5 activities."""
     return ["Beach Volleyball", "Surfing Lessons", "Sandcastle Building", "Beach Photography", "Sunset Yoga"]
 
 def get_timeslots():
-    """Generates 15-minute timeslots from 2:30 PM to 4:45 PM."""
     timeslots = []
     hour = 14
     minute = 30
-    while not (hour == 17 and minute == 0): # Loop up to, but not including, 5:00 PM
+    while not (hour == 17 and minute == 0):
         timeslots.append(f"{hour:02d}:{minute:02d}")
         minute += 15
         if minute >= 60:
             minute = 0
             hour += 1
-        if hour >= 17: # Stop condition
-            break
+        if hour >= 17: break
     return timeslots
-
-def get_signup_count(activity, timeslot):
-    """Counts current signups for a specific activity/timeslot."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM signups WHERE activity = ? AND timeslot = ?", (activity, timeslot))
-    count = cursor.fetchone()[0]
-    conn.close()
-    return count
-
-def add_signup(user_id, activity, timeslot):
-    """Adds a new signup. Returns True on success, False on failure."""
-    conn = get_db_connection()
-    try:
-        conn.execute("INSERT INTO signups (participant_id, activity, timeslot) VALUES (?, ?, ?)",
-                     (user_id, activity, timeslot))
-        conn.commit()
-        success = True
-    except sqlite3.IntegrityError: # Handles double booking (PK violation)
-        print(f"IntegrityError: User {user_id} likely already signed up for timeslot {timeslot}.")
-        success = False
-    except sqlite3.Error as e: # Handles other DB errors
-        print(f"SQLite error in add_signup: {e}")
-        success = False
-    finally:
-        conn.close()
-    return success
-
-def cancel_signup(user_id, activity, timeslot):
-    """Removes a signup. Returns True if a row was deleted, False otherwise."""
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM signups WHERE participant_id = ? AND activity = ? AND timeslot = ?",
-                 (user_id, activity, timeslot))
-        conn.commit()
-        return cursor.rowcount > 0 # Check if any row was affected
-    except sqlite3.Error as e:
-        print(f"SQLite error in cancel_signup: {e}")
-        return False
-    finally:
-        conn.close()
-
-def get_user_signups(user_id):
-    """Gets all signups for a specific user."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT activity, timeslot FROM signups WHERE participant_id = ? ORDER BY timeslot", (user_id,))
-    signups = cursor.fetchall() # Returns a list of Row objects
-    conn.close()
-    return signups
-
-def verify_participant(search_term):
-    """Searches by name or passphrase for verification. Returns list of Row objects."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    # Search by name (case-insensitive) or exact passphrase match (passphrases are stored lowercase)
-    query = """
-        SELECT p.name, p.passphrase, s.activity, s.timeslot
-        FROM participants p
-        LEFT JOIN signups s ON p.id = s.participant_id
-        WHERE lower(p.name) LIKE lower(?) OR p.passphrase = lower(?)
-        ORDER BY p.name, s.timeslot
-    """
-    # Prepare search term for LIKE query
-    like_search_term = f'%{search_term}%'
-    results = cursor.execute(query, (like_search_term, search_term)).fetchall()
-    conn.close()
-    return results
