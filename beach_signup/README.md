@@ -27,6 +27,22 @@ The application has been significantly updated with the following improvements:
 - **Robust Data Access:** Internal data handling has been refactored to use dictionary-based access.
 - **`requirements.txt`:** Added a `requirements.txt` file for easier dependency management.
 
+## Recent Enhancements
+
+The application has been significantly updated with the following improvements:
+
+**User Experience & Workflow:**
+- **Streamlined Onboarding:** The initial name registration and activity signup are now combined into a single, smoother step for new users.
+- **"My Registrations" View:** Users can now easily view a list of all activities they are currently signed up for via an expander in the user section.
+
+**Admin Dashboard:**
+- **Interactive Registration Grid:** The admin view for registrations per activity/timeslot now uses an interactive data editor. Admins can directly check-in participants by toggling a checkbox in the grid.
+- **Metrics Overview:** The admin dashboard now displays key metrics at a glance: "Total Registrations," "Participants Checked-In," and "Check-In Rate (%)."
+
+**Code Quality & Security:**
+- **Secure Admin Credentials:** Hardcoded admin credentials have been removed. The application now uses Streamlit Secrets (`st.secrets`). See the "Setup for Admin Credentials" section for configuration.
+- **Robust Data Access:** Internal data handling has been refactored to use dictionary-based access, making the code more readable and maintainable.
+
 ## Features
 
 **Landing Page (`app.py`):**
@@ -119,6 +135,8 @@ requirements.txt           # Project dependencies (at project root)
     ```bash
     pip install -r requirements.txt
     ```
+    *(Pandas is used for the admin data grid and activity availability display).*
+    
 3.  **Configure Admin Credentials:** Follow the steps in the "Setup for Admin Credentials (Using Streamlit Secrets)" section.
 
 ## How to Run the Application
