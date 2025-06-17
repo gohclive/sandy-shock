@@ -141,7 +141,14 @@ def show_my_bookings_page(user_id, participant_profile):
         st.warning("IMPORTANT: Do not share this passphrase with anyone. It is your unique code for check-in.")
         st.markdown("---")
 
-        if st.button("Cancel This Booking", key=f"cancel_booking_{current_booking['id']}", type="primary"):
+        is_checked_in = bool(current_booking['checked_in']) # Convert 0/1 to False/True
+
+        if is_checked_in:
+            st.warning("🔒 This booking cannot be canceled as you are already checked in for the activity.")
+
+        cancel_button_disabled = is_checked_in
+
+        if st.button("Cancel This Booking", key=f"cancel_booking_{current_booking['id']}", type="primary", disabled=cancel_button_disabled):
             if dm.cancel_registration(current_booking['id']):
                 st.success("Your booking has been successfully cancelled.")
                 st.info("You can now sign up for a new activity.")
