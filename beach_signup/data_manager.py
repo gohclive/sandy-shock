@@ -111,37 +111,46 @@ def get_user_registrations(user_id): # Crucial for the 1-activity limit and "My 
 # add_registration now implements the "1 activity per user" limit
 def add_registration(user_id, name, activity, timeslot):
     conn = get_db_connection()
+    cursor = conn.cursor()
     try:
-        # Check for "1 activity per user" limit FIRST
-        # This check uses a separate connection via get_user_registrations.
-        # For high-concurrency, this could be a point of optimization or require transaction management if done within the same conn.
-        existing_registrations = get_user_registrations(user_id)
-        if existing_registrations: # If list is not empty, user already has a booking
-            print(f"User {user_id} already has an existing registration. Cannot add another.")
+        # Start an immediate transaction to acquire a lock early.
+        cursor.execute("BEGIN IMMEDIATE TRANSACTION")
+
+        # Step 1: Check for existing registrations for this user_id using the current connection
+        cursor.execute("SELECT 1 FROM registrations WHERE user_id = ?", (user_id,))
+        if cursor.fetchone(): # If a registration already exists
+            conn.rollback() # Rollback the transaction
+            conn.close()
             return None, None, "LIMIT_REACHED"
 
-        # Proceed with generating passphrase and inserting if limit not reached
-        passphrase = generate_registration_passphrase(conn) # Uses current connection
+        # Step 2: Proceed with generating passphrase and inserting if limit not reached
+        passphrase = generate_registration_passphrase(conn) # Uses current connection, within the transaction
         reg_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        cursor = conn.cursor() # Use the connection already opened for this function
+
         cursor.execute(
             "INSERT INTO registrations (user_id, participant_name, activity, timeslot, registration_passphrase, registration_time) VALUES (?, ?, ?, ?, ?, ?)",
             (user_id, name, activity, timeslot, passphrase, reg_time)
         )
         registration_id = cursor.lastrowid
-        conn.commit()
+        conn.commit() # Commit the transaction
+        conn.close()
         return registration_id, passphrase, "SUCCESS"
+
     except sqlite3.IntegrityError as e:
-        # This could still happen if, by an extreme coincidence, two requests for the SAME user_id (who has no bookings)
-        # pass the initial check and then one inserts before the other.
-        # The UNIQUE (user_id, activity, timeslot) constraint would catch this.
-        # Or if somehow the generate_registration_passphrase was not unique (should not happen).
-        print(f"Integrity error in add_registration for user {user_id} (likely duplicate activity/slot attempt, or rare passphrase collision): {e}")
-        return None, None, "ALREADY_BOOKED_TIMESLOT" # Re-using this status, though context is slightly different
+        # This error (e.g. UNIQUE constraint on user_id, activity, timeslot)
+        # might occur if the race condition happens at a level not caught by the application logic above,
+        # or for other integrity issues.
+        # print(f"Integrity error in add_registration for user {user_id}: {e}")
+        if conn: # Ensure conn is available before rollback
+            conn.rollback()
+        conn.close()
+        return None, None, "ALREADY_BOOKED_TIMESLOT"
     except sqlite3.Error as e:
-        print(f"Database error in add_registration for user {user_id}: {e}")
+        # print(f"Database error in add_registration for user {user_id}: {e}")
+        if conn: # Ensure conn is available before rollback
+            conn.rollback()
+        conn.close()
         return None, None, "DB_ERROR"
-    finally: conn.close()
 
 def get_signup_count(activity, timeslot):
     conn = get_db_connection()
