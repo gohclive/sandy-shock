@@ -139,6 +139,40 @@ requirements.txt           # Project dependencies (at project root)
     
 3.  **Configure Admin Credentials:** Follow the steps in the "Setup for Admin Credentials (Using Streamlit Secrets)" section.
 
+### Running the Race Condition Test
+
+The project includes a test script to simulate a race condition for activity registrations. This test verifies that the system correctly handles concurrent requests for the last available slot in an activity, based on user registration limits.
+
+To run the test:
+
+1.  **Navigate to the script's directory or ensure correct PYTHONPATH:**
+    *   **Option 1 (Navigate to directory):**
+        Open your terminal and change to the `beach_signup` directory:
+        ```bash
+        cd path/to/your/project/beach_signup
+        ```
+        *(Replace `path/to/your/project/` with the actual path to where you've cloned or placed the project files).*
+        Then execute the script:
+        ```bash
+        python3 test_race_condition.py
+        ```
+        (or `python test_race_condition.py` depending on your system's Python 3 alias).
+
+    *   **Option 2 (Run from project root with PYTHONPATH):**
+        If you are in the project root directory (e.g., `/app` in the execution environment, or the directory containing the `beach_signup` folder locally) and have set the `PYTHONPATH` environment variable to include this root (e.g., `export PYTHONPATH=/app:$PYTHONPATH`), you can run it as:
+        ```bash
+        python3 beach_signup/test_race_condition.py
+        ```
+
+2.  **Expected Output:**
+    If the test runs successfully, it will print several messages indicating the setup process, the start and completion of concurrent registration attempts, and the status of each attempt. The script will conclude with:
+    ```
+    All assertions passed. Test completed successfully!
+    ```
+    If any assertion fails, the script will terminate with an `AssertionError`, indicating a problem.
+
+    **Note:** The test script directly interacts with the `beach_day.db` database file within the `beach_signup` directory. It will clear existing registration and participant data at the beginning of its execution to ensure a clean state for the test.
+
 ## How to Run the Application
 
 1.  Navigate to the root directory of the project (the one containing the `beach_signup` folder).
