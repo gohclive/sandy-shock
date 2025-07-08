@@ -13,6 +13,13 @@ project_root_or_beach_signup_dir = os.path.dirname(current_file_dir) # This shou
 if project_root_or_beach_signup_dir not in sys.path:
     sys.path.append(project_root_or_beach_signup_dir)
 
+from session_manager import sync_session_state_with_url
+
+# --- THIS IS THE MOST IMPORTANT STEP ---
+# Call the sync function AT THE VERY TOP of the script.
+sync_session_state_with_url()
+# -----------------------------------------
+
 import data_manager as dm
 import utils as ut
 
@@ -227,16 +234,7 @@ def show_my_bookings_page(user_id, participant_profile):
             else:
                 st.error("Could not cancel the booking. Please try again or contact support.")
 
-def initialize_user_session():
-    if 'user_id' not in st.session_state:
-        query_params = st.query_params
-        uid_from_url = query_params.get("uid")
-        if uid_from_url:
-            st.session_state.user_id = uid_from_url[0] if isinstance(uid_from_url, list) else uid_from_url
-        else:
-            new_user_id = f"beach_{str(uuid.uuid4())[:8]}"
-            st.session_state.user_id = new_user_id
-            st.query_params["uid"] = new_user_id
+
 
 def display_user_portal():
     # --- Portal Lock Logic ---
@@ -244,18 +242,16 @@ def display_user_portal():
     unlock_date = singapore_tz.localize(datetime.datetime(2025, 7, 10, 0, 0, 0))
     current_sg_time = get_current_singapore_time()
 
-    # if current_sg_time < unlock_date:
-    #     st.title("🏖️ User Portal - Temporarily Closed")
-    #     st.image("https://images.unsplash.com/photo-1507525428034-b723cf961d3e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80", use_container_width=True) # Example beach image
-    #     st.warning(
-    #         f"The User Portal is currently closed. "
-    #         f"It will become accessible on **July 10, 2025** (Singapore Time)."
-    #     )
-    #     st.info(f"Current Singapore Time: {current_sg_time.strftime('%Y-%m-%d %I:%M %p')}")
-    #     st.info(f"Scheduled Unlock Time: {unlock_date.strftime('%Y-%m-%d %I:%M %p')}")
-    #     return # Stop further execution if portal is locked
-
-    initialize_user_session()
+    if current_sg_time < unlock_date:
+        st.title("🏖️ User Portal - Temporarily Closed")
+        st.image("https://images.unsplash.com/photo-1507525428034-b723cf961d3e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80", use_container_width=True) # Example beach image
+        st.warning(
+            f"The User Portal is currently closed. "
+            f"It will become accessible on **July 10, 2025** (Singapore Time)."
+        )
+        st.info(f"Current Singapore Time: {current_sg_time.strftime('%Y-%m-%d %I:%M %p')}")
+        st.info(f"Scheduled Unlock Time: {unlock_date.strftime('%Y-%m-%d %I:%M %p')}")
+        return # Stop further execution if portal is locked
 
     user_id = st.session_state.user_id
     participant_profile = dm.find_participant_by_id(user_id)

@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-# import uuid # Likely not needed for admin page
+import secrets
 import os
 import sys
 
@@ -9,6 +9,13 @@ current_file_dir = os.path.dirname(os.path.abspath(__file__))
 project_root_or_beach_signup_dir = os.path.dirname(current_file_dir)
 if project_root_or_beach_signup_dir not in sys.path:
     sys.path.append(project_root_or_beach_signup_dir)
+
+
+from session_manager import sync_session_state_with_url
+# --- THIS IS THE MOST IMPORTANT STEP ---
+# Call the sync function AT THE VERY TOP of the script.
+sync_session_state_with_url()
+# -----------------------------------------
 
 import data_manager as dm
 import utils as ut
@@ -185,7 +192,7 @@ def show_admin_dashboard_page():
 def display_admin_page():
     st.title("🔒 Admin Dashboard")
 
-    if not st.session_state.get('admin_logged_in', False):
+    if not st.session_state.get('admin_auth_token'):
         with st.form("admin_login_form_page"):
             st.subheader("Admin Login")
             username = st.text_input("Username", key="admin_user_input_page")
@@ -193,14 +200,23 @@ def display_admin_page():
             login_button = st.form_submit_button("Login")
             if login_button:
                 if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-                    st.session_state.admin_logged_in = True
+                    # On success, just set the session state token.
+                    # app.py will automatically add it to the URL.
+                    st.session_state.admin_auth_token = secrets.token_hex(16)
                     st.rerun()
                 else:
                     st.error("Invalid credentials.")
     else:
+        # If logged in, show the dashboard and logout button.
         st.sidebar.success("Admin Logged In")
         if st.sidebar.button("Logout Admin", key="admin_logout_page_sidebar"):
-            st.session_state.admin_logged_in = False
+            # On logout, we must explicitly clear BOTH session state and the URL param.
+            if 'admin_auth_token' in st.session_state:
+                del st.session_state.admin_auth_token
+            
+            # This is the critical addition to prevent the "zombie session" on refresh
+            st.query_params.clear() 
+            
             st.rerun()
         show_admin_dashboard_page()
 

@@ -1,5 +1,12 @@
 import streamlit as st
 
+from session_manager import sync_session_state_with_url
+
+# --- THIS IS THE MOST IMPORTANT STEP ---
+# Call the sync function AT THE VERY TOP of the script.
+sync_session_state_with_url()
+# -----------------------------------------
+
 def display_sentosa_qr_page():
     st.title("🎫 Sentosa Entry QR Code")
 

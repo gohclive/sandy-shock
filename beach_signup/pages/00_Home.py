@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import sys
+import uuid
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
@@ -83,6 +84,11 @@ def main_landing_page():
     st.title("🏖️ Welcome to T-Day 2025!")
     st.write("Join us for a fantastic day at the beach! Sign up for activities, manage your bookings, and find event details all in one place.")
     st.sidebar.success("Navigate using the links above.")
+
+    # Ensure user_id is initialized for session persistence tracking
+    if 'user_id' not in st.session_state:
+        st.session_state.user_id = f"beach_{str(uuid.uuid4())[:8]}"
+        st.rerun() # Rerun to allow app.py to pick up the new user_id and add to URL
 
     st.markdown("---")
     st.header("Explore Our App")
