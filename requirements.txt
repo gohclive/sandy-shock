@@ -1,3 +1,5 @@
 streamlit
 pandas
 pyodbc~=5.2
+ntplib
+pytz
