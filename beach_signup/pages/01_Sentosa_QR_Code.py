@@ -4,7 +4,7 @@ def display_sentosa_qr_page():
     st.title("🎫 Sentosa Entry QR Code")
 
     # Placeholder QR code URL
-    qr_code_url = "../images/qr-code.png"
+    qr_code_url = "beach_signup/images/qr-code.png"
     st.image(qr_code_url, width=250)
 
     st.subheader("Important Information")

@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import sys
-import data_manager as dm # Import after path adjustment
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
@@ -17,7 +16,7 @@ def display_siloso_beach_directions(): # Content from 03_Event_Details.py
     # Note: Make sure to save the image file in your streamlit app directory
     # You can save the image as "siloso_beach_map.png" or similar
     try:
-        st.image("../images/siloso_beach_map.jpeg", 
+        st.image("beach_signup/images/siloso_beach_map.jpeg", 
                 caption="Siloso Beach Location Map - Event venue is marked with the red arrow", 
                 use_container_width =True)
     except:
@@ -81,8 +80,6 @@ def display_siloso_beach_directions(): # Content from 03_Event_Details.py
     st.success("Enjoy your day at the beach! ☀️")
 
 def main_landing_page():
-    dm.initialize_database() # Initialize DB once when the app starts
-
     st.title("🏖️ Welcome to T-Day 2025!")
     st.write("Join us for a fantastic day at the beach! Sign up for activities, manage your bookings, and find event details all in one place.")
     st.sidebar.success("Navigate using the links above.")

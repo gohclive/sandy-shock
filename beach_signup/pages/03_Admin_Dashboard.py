@@ -136,9 +136,6 @@ def show_admin_dashboard_page():
                             st.error("Check-in failed.")
         elif verify_button and not passphrase_input:
             st.warning("Please enter a passphrase to verify.")
-    
-    if st.button("Go to Test DB"):
-        st.switch_page("pages/.test_db.py")
 
 def display_admin_page():
     st.title("🔒 Admin Dashboard")

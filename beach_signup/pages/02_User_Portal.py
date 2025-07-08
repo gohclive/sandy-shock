@@ -31,11 +31,11 @@ def get_current_singapore_time():
         # For a production system, you might want a more robust fallback or error handling.
         return datetime.datetime.now(pytz.timezone('Asia/Singapore'))
 
-# ADMIN_USERNAME and ADMIN_PASSWORD removed
-# show_admin_dashboard_page function removed
-
 # Function to display the participant sign-up page
 def show_signup_page(participant_session_id, current_participant_profile):
+    # intialize database()
+    dm.initialize_database()
+
     st.header("📝 Sign Up For Activities")
 
     # --- Display Activity Availability Grid (Moved Up) ---
@@ -187,9 +187,6 @@ def initialize_user_session():
             st.query_params["uid"] = new_user_id
 
 def display_user_portal():
-    # st.set_page_config removed
-    # dm.initialize_database() removed (will be in main app.py)
-
     # --- Portal Lock Logic ---
     singapore_tz = pytz.timezone('Asia/Singapore')
     unlock_date = singapore_tz.localize(datetime.datetime(2025, 7, 10, 0, 0, 0))
@@ -197,7 +194,6 @@ def display_user_portal():
 
     if current_sg_time < unlock_date:
         st.title("🏖️ User Portal - Temporarily Closed")
-        st.image("https://images.unsplash.com/photo-1507525428034-b723cf961d3e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80", use_container_width=True) # Example beach image
         st.warning(
             f"The User Portal is currently closed. "
             f"It will become accessible on **July 10, 2025** (Singapore Time)."
