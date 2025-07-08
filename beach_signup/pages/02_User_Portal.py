@@ -3,6 +3,9 @@ import streamlit as st
 import uuid
 import os
 import sys
+import datetime
+import ntplib
+import pytz
 
 # Path Adjustment for imports
 current_file_dir = os.path.dirname(os.path.abspath(__file__))
@@ -12,6 +15,21 @@ if project_root_or_beach_signup_dir not in sys.path:
 
 import data_manager as dm
 import utils as ut
+
+# --- NTP Time Function ---
+def get_current_singapore_time():
+    """Fetches time from NTP and converts to Singapore timezone."""
+    try:
+        ntp_client = ntplib.NTPClient()
+        response = ntp_client.request('pool.ntp.org', version=3)
+        ntp_time = datetime.datetime.fromtimestamp(response.tx_time, datetime.timezone.utc)
+        singapore_tz = pytz.timezone('Asia/Singapore')
+        return ntp_time.astimezone(singapore_tz)
+    except Exception as e:
+        st.error(f"Error fetching NTP time: {e}. Falling back to system time for checks (this might be inaccurate).")
+        # Fallback to system time in case NTP fails, but make it clear it's a fallback.
+        # For a production system, you might want a more robust fallback or error handling.
+        return datetime.datetime.now(pytz.timezone('Asia/Singapore'))
 
 # ADMIN_USERNAME and ADMIN_PASSWORD removed
 # show_admin_dashboard_page function removed
@@ -171,6 +189,23 @@ def initialize_user_session():
 def display_user_portal():
     # st.set_page_config removed
     # dm.initialize_database() removed (will be in main app.py)
+
+    # --- Portal Lock Logic ---
+    singapore_tz = pytz.timezone('Asia/Singapore')
+    unlock_date = singapore_tz.localize(datetime.datetime(2025, 7, 10, 0, 0, 0))
+    current_sg_time = get_current_singapore_time()
+
+    if current_sg_time < unlock_date:
+        st.title("🏖️ User Portal - Temporarily Closed")
+        st.image("https://images.unsplash.com/photo-1507525428034-b723cf961d3e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80", use_container_width=True) # Example beach image
+        st.warning(
+            f"The User Portal is currently closed. "
+            f"It will become accessible on **July 10, 2025** (Singapore Time)."
+        )
+        st.info(f"Current Singapore Time: {current_sg_time.strftime('%Y-%m-%d %I:%M %p')}")
+        st.info(f"Scheduled Unlock Time: {unlock_date.strftime('%Y-%m-%d %I:%M %p')}")
+        return # Stop further execution if portal is locked
+
     initialize_user_session()
 
     user_id = st.session_state.user_id
