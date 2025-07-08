@@ -1,14 +1,31 @@
-import sqlite3
+import pyodbc
 import os
 import random
 from datetime import datetime
+import streamlit as st # Added for secrets access
 
-DB_FILE = "beach_day.db"
+# DB_FILE = "beach_day.db" # No longer needed for Azure SQL
 
 def get_db_connection():
-    db_path = os.path.join(os.path.dirname(__file__), DB_FILE)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    # Read Azure SQL connection info from Streamlit secrets
+    server = st.secrets["azure_sql"]["server"]
+    database = st.secrets["azure_sql"]["database"]
+    username = st.secrets["azure_sql"]["username"]
+    password = st.secrets["azure_sql"]["password"]
+    driver = st.secrets["azure_sql"].get("driver", "{ODBC Driver 17 for SQL Server}") # Default driver
+
+    conn_str = (
+        f"DRIVER={driver};"
+        f"SERVER={server};"
+        f"DATABASE={database};"
+        f"UID={username};"
+        f"PWD={password};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=30;"
+    )
+    conn = pyodbc.connect(conn_str)
+    # conn.row_factory = pyodbc.Row # pyodbc cursors return Row objects by default when iterating
     return conn
 
 def load_word_list():
@@ -50,28 +67,45 @@ def generate_registration_passphrase(conn):
 def initialize_database():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS participants (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            created_time TEXT NOT NULL
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS registrations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            participant_name TEXT NOT NULL,
-            activity TEXT NOT NULL,
-            timeslot TEXT NOT NULL,
-            registration_passphrase TEXT NOT NULL UNIQUE,
-            registration_time TEXT NOT NULL,
-            checked_in INTEGER DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES participants (id),
-            UNIQUE (user_id, activity, timeslot) -- Prevents user from booking same activity/slot again if they somehow bypass UI
-                                                -- Note: The overall "1 activity per user" limit is handled in add_registration logic
-        )
-    ''')
+    # Note: Azure SQL uses 'IF OBJECT_ID' for checking existence, but CREATE TABLE IF NOT EXISTS is simpler if supported or for general use.
+    # For Azure SQL, it's generally better to ensure tables are created via a separate script or migration tool.
+    # However, for this exercise, we'll adapt it to run, acknowledging it might warn if tables exist.
+    # Or, we can query INFORMATION_SCHEMA.TABLES first. Let's try a more robust way for Azure SQL.
+
+    # Check if participants table exists
+    cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'participants'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE participants (
+                id NVARCHAR(255) PRIMARY KEY,
+                name NVARCHAR(255) NOT NULL,
+                created_time DATETIME2 NOT NULL
+            )
+        ''')
+        print("Created participants table.")
+    else:
+        print("Participants table already exists.")
+
+    # Check if registrations table exists
+    cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'registrations'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE registrations (
+                id INT PRIMARY KEY IDENTITY(1,1),
+                user_id NVARCHAR(255) NOT NULL,
+                participant_name NVARCHAR(255) NOT NULL,
+                activity NVARCHAR(100) NOT NULL,
+                timeslot NVARCHAR(50) NOT NULL,
+                registration_passphrase NVARCHAR(255) NOT NULL UNIQUE,
+                registration_time DATETIME2 NOT NULL,
+                checked_in INT DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES participants (id),
+                CONSTRAINT UQ_user_activity_timeslot UNIQUE (user_id, activity, timeslot)
+            )
+        ''')
+        print("Created registrations table.")
+    else:
+        print("Registrations table already exists.")
     conn.commit()
     conn.close()
 
@@ -83,74 +117,84 @@ def create_participant(user_id, name):
         if cursor.fetchone():
             # print(f"Participant {user_id} already exists.") # Less verbose
             return True
-        created_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        created_time = datetime.now() # Store as datetime object, will be handled by pyodbc
         cursor.execute( "INSERT INTO participants (id, name, created_time) VALUES (?, ?, ?)", (user_id, name, created_time) )
         conn.commit()
         return True
-    except sqlite3.Error as e:
+    except pyodbc.Error as e: # Changed to pyodbc.Error
         print(f"Database error in create_participant: {e}")
+        # Consider specific error codes for "already exists" if needed, e.g., 2627 for unique constraint violation
+        conn.rollback() # Rollback on error
         return False
-    finally: conn.close()
+    finally:
+        if conn: conn.close()
 
 def find_participant_by_id(user_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM participants WHERE id = ?", (user_id,))
-    participant = cursor.fetchone()
+    row = cursor.fetchone() # pyodbc.Row object
     conn.close()
-    return dict(participant) if participant else None
+    # Convert pyodbc.Row to dict
+    return {desc[0]: value for desc, value in zip(cursor.description, row)} if row else None
 
-def get_user_registrations(user_id): # Crucial for the 1-activity limit and "My Bookings"
+
+def get_user_registrations(user_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM registrations WHERE user_id = ? ORDER BY registration_time DESC", (user_id,))
-    registrations = cursor.fetchall()
+    rows = cursor.fetchall()
     conn.close()
-    return [dict(reg) for reg in registrations]
+    # Convert list of pyodbc.Row to list of dicts
+    return [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in rows]
 
-# add_registration now implements the "1 activity per user" limit
+
 def add_registration(user_id, name, activity, timeslot):
     conn = get_db_connection()
-    cursor = conn.cursor()
     try:
-        # Start an immediate transaction to acquire a lock early.
-        cursor.execute("BEGIN IMMEDIATE TRANSACTION")
+        cursor = conn.cursor()
+        # For pyodbc, transactions are typically managed by autocommit=False (default)
+        # and explicit conn.commit() or conn.rollback().
+        # No need for "BEGIN IMMEDIATE TRANSACTION"
 
-        # Step 1: Check for existing registrations for this user_id using the current connection
+        # Step 1: Check for existing registrations for this user_id
         cursor.execute("SELECT 1 FROM registrations WHERE user_id = ?", (user_id,))
-        if cursor.fetchone(): # If a registration already exists
-            conn.rollback() # Rollback the transaction
+        if cursor.fetchone():
+            conn.rollback()
             conn.close()
             return None, None, "LIMIT_REACHED"
 
-        # Step 2: Proceed with generating passphrase and inserting if limit not reached
-        passphrase = generate_registration_passphrase(conn) # Uses current connection, within the transaction
-        reg_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # Step 2: Proceed with generating passphrase and inserting
+        passphrase = generate_registration_passphrase(conn)
+        reg_time = datetime.now() # Store as datetime object
 
         cursor.execute(
             "INSERT INTO registrations (user_id, participant_name, activity, timeslot, registration_passphrase, registration_time) VALUES (?, ?, ?, ?, ?, ?)",
             (user_id, name, activity, timeslot, passphrase, reg_time)
         )
-        registration_id = cursor.lastrowid
-        conn.commit() # Commit the transaction
+        # Get the last inserted ID using SCOPE_IDENTITY() for SQL Server
+        cursor.execute("SELECT SCOPE_IDENTITY()")
+        registration_id = cursor.fetchone()[0]
+        conn.commit()
         conn.close()
         return registration_id, passphrase, "SUCCESS"
 
-    except sqlite3.IntegrityError as e:
-        # This error (e.g. UNIQUE constraint on user_id, activity, timeslot)
-        # might occur if the race condition happens at a level not caught by the application logic above,
-        # or for other integrity issues.
+    except pyodbc.IntegrityError as e: # Specific error for integrity issues
+        # Check for unique constraint violation (error code 2627 or 2601 for SQL Server)
+        # sqlstate for unique constraint violation is often '23000'
         # print(f"Integrity error in add_registration for user {user_id}: {e}")
-        if conn: # Ensure conn is available before rollback
-            conn.rollback()
-        conn.close()
-        return None, None, "ALREADY_BOOKED_TIMESLOT"
-    except sqlite3.Error as e:
+        # print(f"SQLSTATE: {e.args[0]}") # e.args[0] usually contains the SQLSTATE
+        if conn: conn.rollback()
+        if conn: conn.close()
+        if e.args[0] in ('23000', '2627', '2601'): # Check for unique constraint violation
+             return None, None, "ALREADY_BOOKED_TIMESLOT" # Or a more specific "LIMIT_REACHED" if only user_id is unique
+        return None, None, "DB_ERROR" # Generic database error
+    except pyodbc.Error as e: # General pyodbc error
         # print(f"Database error in add_registration for user {user_id}: {e}")
-        if conn: # Ensure conn is available before rollback
-            conn.rollback()
-        conn.close()
+        if conn: conn.rollback()
+        if conn: conn.close()
         return None, None, "DB_ERROR"
+
 
 def get_signup_count(activity, timeslot):
     conn = get_db_connection()
@@ -166,86 +210,81 @@ def cancel_registration(registration_id):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM registrations WHERE id = ?", (registration_id,))
         conn.commit()
-        return cursor.rowcount > 0
-    except sqlite3.Error as e:
+        return cursor.rowcount > 0 # rowcount indicates number of rows affected
+    except pyodbc.Error as e: # Changed to pyodbc.Error
         print(f"Database error in cancel_registration: {e}")
+        conn.rollback()
         return False
-    finally: conn.close()
+    finally:
+        if conn: conn.close()
 
 def get_registration_by_passphrase(passphrase):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM registrations WHERE registration_passphrase = ?", (passphrase,))
-    registration = cursor.fetchone()
+    row = cursor.fetchone()
     conn.close()
-    return dict(registration) if registration else None
+    return {desc[0]: value for desc, value in zip(cursor.description, row)} if row else None
+
 
 def check_in_registration(registration_id):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT checked_in FROM registrations WHERE id = ?", (registration_id,))
-        result = cursor.fetchone() # result is a Row object here
-        if result is None:
+        result_row = cursor.fetchone()
+        if result_row is None:
+            conn.close()
             return False
-        # Access by key for consistency, though result[0] would also work for Row object
-        if result['checked_in'] == 1:
+        # pyodbc.Row can be accessed by column name
+        if result_row.checked_in == 1: # Access by column name
+            conn.close()
             return False
         cursor.execute("UPDATE registrations SET checked_in = 1 WHERE id = ?", (registration_id,))
         conn.commit()
-        return cursor.rowcount > 0
-    except sqlite3.Error as e:
+        success = cursor.rowcount > 0
+        conn.close()
+        return success
+    except pyodbc.Error as e: # Changed to pyodbc.Error
         print(f"Database error in check_in_registration: {e}")
+        if conn: conn.rollback()
+        if conn: conn.close()
         return False
-    finally: conn.close()
 
 def uncheck_in_registration(registration_id):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        # Optional: Check if the registration exists and is currently checked in
-        # cursor.execute("SELECT checked_in FROM registrations WHERE id = ?", (registration_id,))
-        # result = cursor.fetchone()
-        # if result is None:
-        #     print(f"Registration ID {registration_id} not found for uncheck.")
-        #     return False
-        # if result['checked_in'] == 0:
-        #     print(f"Registration ID {registration_id} is already not checked in.")
-        #     return True # Or False, depending on desired behavior for already unchecked
-
         cursor.execute("UPDATE registrations SET checked_in = 0 WHERE id = ?", (registration_id,))
         conn.commit()
-        if cursor.rowcount > 0:
-            # print(f"Successfully unchecked registration ID {registration_id}.")
-            return True
-        else:
-            # This might happen if the registration_id doesn't exist,
-            # or if the status was already 0 (so no rows were changed by UPDATE).
-            # To differentiate, one might need the SELECT check above.
-            # For now, simply returning rowcount > 0 is fine.
-            # print(f"No rows updated for uncheck of registration ID {registration_id}. May not exist or already unchecked.")
-            return False # Consider if this should be True if already 0. Let's go with False if no update occurred.
-    except sqlite3.Error as e:
-        print(f"Database error in uncheck_in_registration for ID {registration_id}: {e}")
-        return False
-    finally:
+        success = cursor.rowcount > 0
+        # print(f"Uncheck registration ID {registration_id} - success: {success}, rows affected: {cursor.rowcount}")
         conn.close()
+        return success
+    except pyodbc.Error as e: # Changed to pyodbc.Error
+        print(f"Database error in uncheck_in_registration for ID {registration_id}: {e}")
+        if conn: conn.rollback()
+        if conn: conn.close()
+        return False
+
 
 def get_registrations_for_timeslot(activity, timeslot):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM registrations WHERE activity = ? AND timeslot = ? ORDER BY registration_time", (activity, timeslot))
-    registrations = cursor.fetchall()
+    rows = cursor.fetchall()
     conn.close()
-    return [dict(reg) for reg in registrations]
+    return [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in rows]
+
 
 def get_registrations_for_participant(participant_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM registrations WHERE user_id = ?", (participant_id,))
-    registrations = cursor.fetchall()
+    rows = cursor.fetchall()
     conn.close()
-    return [dict(reg) for reg in registrations]
+    return [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in rows]
+
 
 def get_total_registration_count():
     conn = get_db_connection()
@@ -268,26 +307,27 @@ def get_total_registration_count_for_activity(activity):
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM registrations WHERE activity = ?", (activity,))
-        count = cursor.fetchone()[0] # sqlite3.Row will allow index access here
+        count = cursor.fetchone()[0]
         return count
-    except sqlite3.Error as e:
+    except pyodbc.Error as e: # Changed to pyodbc.Error
         print(f"Database error in get_total_registration_count_for_activity for {activity}: {e}")
-        return 0 # Return 0 in case of error
+        return 0
     finally:
-        conn.close()
+        if conn: conn.close()
+
 
 def get_checked_in_count_for_activity(activity):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM registrations WHERE checked_in = 1 AND activity = ?", (activity,))
-        count = cursor.fetchone()[0] # sqlite3.Row will allow index access here
+        count = cursor.fetchone()[0]
         return count
-    except sqlite3.Error as e:
+    except pyodbc.Error as e: # Changed to pyodbc.Error
         print(f"Database error in get_checked_in_count_for_activity for {activity}: {e}")
-        return 0 # Return 0 in case of error
+        return 0
     finally:
-        conn.close()
+        if conn: conn.close()
 
 def get_activities():
     return ["Beach Volleyball", "Surfing Lessons", "Sandcastle Building", "Beach Photography", "Sunset Yoga"]
