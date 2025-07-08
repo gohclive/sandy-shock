@@ -153,10 +153,7 @@ def add_registration(user_id, name, activity, timeslot):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        # For pyodbc, transactions are typically managed by autocommit=False (default)
-        # and explicit conn.commit() or conn.rollback().
-        # No need for "BEGIN IMMEDIATE TRANSACTION"
-
+        
         # Step 1: Check for existing registrations for this user_id
         cursor.execute("SELECT 1 FROM registrations WHERE user_id = ?", (user_id,))
         if cursor.fetchone():
@@ -180,10 +177,6 @@ def add_registration(user_id, name, activity, timeslot):
         return registration_id, passphrase, "SUCCESS"
 
     except pyodbc.IntegrityError as e: # Specific error for integrity issues
-        # Check for unique constraint violation (error code 2627 or 2601 for SQL Server)
-        # sqlstate for unique constraint violation is often '23000'
-        # print(f"Integrity error in add_registration for user {user_id}: {e}")
-        # print(f"SQLSTATE: {e.args[0]}") # e.args[0] usually contains the SQLSTATE
         if conn: conn.rollback()
         if conn: conn.close()
         if e.args[0] in ('23000', '2627', '2601'): # Check for unique constraint violation
@@ -330,14 +323,57 @@ def get_checked_in_count_for_activity(activity):
         if conn: conn.close()
 
 def get_activities():
-    return ["Beach Volleyball", "Surfing Lessons", "Sandcastle Building", "Beach Photography", "Sunset Yoga"]
+    return [activity["name"] for activity in ACTIVITIES]
 
-def get_timeslots():
+# Define activities with their properties
+ACTIVITIES = [
+    {"name": "Canvas Painting", "slots": 72, "duration": 45, "id": "canvas_painting"},
+    {"name": "Tote Bag Painting", "slots": 72, "duration": 45, "id": "tote_bag_painting"},
+    {"name": "Shrink Art Keychain", "slots": 48, "duration": 20, "id": "shrink_art_keychain"},
+    {"name": "Massage by SAVH", "slots": 12, "duration": 30, "id": "massage_SAVH"},
+]
+
+def get_activity_details(activity_name):
+    for activity in ACTIVITIES:
+        if activity["name"] == activity_name:
+            return activity
+    return None
+
+def get_timeslots(activity_duration_minutes):
+    """
+    Generates timeslots based on activity duration.
+    Activities start at intervals equal to their duration (no overlap).
+    The event runs from 14:30 to 17:00.
+    
+    For example:
+    - A 45-minute activity: 14:30-15:15, then 15:15-16:00, then 16:00-16:45
+    - A 20-minute activity: 14:30-14:50, then 14:50-15:10, then 15:10-15:30, etc.
+    """
     timeslots = []
-    hour = 14; minute = 30
-    while not (hour == 17 and minute == 0):
-        timeslots.append(f"{hour:02d}:{minute:02d}")
-        minute += 15
-        if minute >= 60: minute = 0; hour += 1
-        if hour >= 17: break
+    event_start_hour, event_start_minute = 14, 30
+    event_end_hour, event_end_minute = 17, 0
+    
+    # Convert event times to minutes for easier calculation
+    event_start_minutes = event_start_hour * 60 + event_start_minute
+    event_end_minutes = event_end_hour * 60 + event_end_minute
+    
+    current_minutes = event_start_minutes
+    
+    while True:
+        # Calculate when this activity would end if it started now
+        activity_end_minutes = current_minutes + activity_duration_minutes
+        
+        # Check if this activity would finish before or at the event end time
+        if activity_end_minutes <= event_end_minutes:
+            # Convert back to hours and minutes for display
+            current_hour = current_minutes // 60
+            current_minute = current_minutes % 60
+            timeslots.append(f"{current_hour:02d}:{current_minute:02d}")
+            
+            # Move to next start time (after this activity ends)
+            current_minutes += activity_duration_minutes
+        else:
+            # Activity would run past event end time, so stop
+            break
+            
     return timeslots

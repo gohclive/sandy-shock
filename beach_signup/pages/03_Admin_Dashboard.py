@@ -17,10 +17,9 @@ import utils as ut
 ADMIN_USERNAME = st.secrets["admin"]["username"]
 ADMIN_PASSWORD = st.secrets["admin"]["password"]
 
-# show_admin_dashboard_page() function definition (copied from app.py before restructuring)
+# show_admin_dashboard_page() function definition (updated for new timeslot structure)
 def show_admin_dashboard_page():
-    st.header("👑 Admin Dashboard") # This header is fine, page title is handled by display_admin_page
-    # st.write("Manage activities, view registrations, and check-in participants.") # This can be removed if redundant
+    st.header("👑 Admin Dashboard")
 
     # --- Admin Metrics Overview ---
     total_registrations = dm.get_total_registration_count()
@@ -40,12 +39,12 @@ def show_admin_dashboard_page():
 
     admin_action = st.selectbox("Admin Actions:",
                                 ["View Activity Status & Check-In", "Verify by Passphrase & Check-In"],
-                                key="admin_main_action_select_page") # Unique key
+                                key="admin_main_action_select_page")
 
     if admin_action == "View Activity Status & Check-In":
         st.subheader("Activity Status & Registrations")
         activities = dm.get_activities()
-        selected_activity = st.selectbox("Select Activity:", [""] + activities, key="admin_select_activity_page") # Unique key
+        selected_activity = st.selectbox("Select Activity:", [""] + activities, key="admin_select_activity_page")
 
         if selected_activity:
             st.markdown(f"### Statistics for {selected_activity}")
@@ -59,56 +58,102 @@ def show_admin_dashboard_page():
             act_col3.metric(f"Check-In Rate ({selected_activity})", f"{activity_check_in_rate:.2f}%")
             st.markdown("---")
 
-            timeslots = dm.get_timeslots()
-            selected_timeslot = st.selectbox("Select Timeslot:", [""] + timeslots, key="admin_select_timeslot_page") # Unique key
+            # Get timeslots for the selected activity
+            activity_details = dm.get_activity_details(selected_activity)
+            if activity_details:
+                timeslots = dm.get_timeslots(activity_details["duration"])
+                selected_timeslot = st.selectbox("Select Timeslot:", [""] + timeslots, key="admin_select_timeslot_page")
 
-            if selected_timeslot:
-                st.markdown(f"**Registrations for {selected_activity} at {selected_timeslot}:**")
-                registrations = dm.get_registrations_for_timeslot(selected_activity, selected_timeslot)
-                if not registrations:
-                    st.info("No registrations for this activity/timeslot yet.")
-                else:
-                    display_data = []
-                    for reg in registrations:
-                        is_checked_in = bool(reg['checked_in'])
-                        display_data.append({
-                            "Reg ID": reg['id'],
-                            "Name": reg['participant_name'],
-                            "Passphrase": ut.format_passphrase_display(reg['registration_passphrase']),
-                            "Checked In": is_checked_in,
-                        })
-                    registrations_df = pd.DataFrame(display_data)
-                    if not registrations_df.empty:
-                        disabled_columns = [col for col in registrations_df.columns if col != "Checked In"]
-                        edited_df = st.data_editor(
-                            registrations_df,
-                            disabled=disabled_columns,
-                            key="admin_registrations_editor_page", # Unique key
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                        for i in range(len(registrations_df)):
-                            original_status = registrations_df.loc[i, "Checked In"]
-                            edited_status = edited_df.loc[i, "Checked In"]
-                            reg_id = registrations_df.loc[i, "Reg ID"]
-                            if not original_status and edited_status:
-                                if dm.check_in_registration(int(reg_id)):
-                                    st.success(f"Checked in participant with Reg ID: {reg_id}.")
-                                else:
-                                    st.error(f"Failed to check in participant with Reg ID: {reg_id}.")
-                                st.rerun()
-                            elif original_status and not edited_status:
-                                if dm.uncheck_in_registration(int(reg_id)):
-                                    st.success(f"Unchecked participant with Reg ID: {reg_id}.")
-                                else:
-                                    st.error(f"Failed to uncheck participant with Reg ID: {reg_id}.")
-                                st.rerun()
+                if selected_timeslot:
+                    st.markdown(f"**Registrations for {selected_activity} at {selected_timeslot}:**")
+                    registrations = dm.get_registrations_for_timeslot(selected_activity, selected_timeslot)
+                    if not registrations:
+                        st.info("No registrations for this activity/timeslot yet.")
                     else:
-                        st.info("No registrations data to display in editor.")
+                        display_data = []
+                        for reg in registrations:
+                            is_checked_in = bool(reg['checked_in'])
+                            display_data.append({
+                                "Reg ID": reg['id'],
+                                "Name": reg['participant_name'],
+                                "Passphrase": ut.format_passphrase_display(reg['registration_passphrase']),
+                                "Checked In": is_checked_in,
+                                "Remove": False,  # New column for deletion
+                            })
+                        registrations_df = pd.DataFrame(display_data)
+                        if not registrations_df.empty:
+                            disabled_columns = [col for col in registrations_df.columns if col not in ["Checked In", "Remove"]]
+                            edited_df = st.data_editor(
+                                registrations_df,
+                                disabled=disabled_columns,
+                                key="admin_registrations_editor_page",
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Remove": st.column_config.CheckboxColumn(
+                                        "🗑️ Remove",
+                                        help="Check to remove this registration",
+                                        default=False,
+                                    )
+                                }
+                            )
+                            
+                            # Handle check-in/uncheck-in changes
+                            for i in range(len(registrations_df)):
+                                original_status = registrations_df.loc[i, "Checked In"]
+                                edited_status = edited_df.loc[i, "Checked In"]
+                                reg_id = registrations_df.loc[i, "Reg ID"]
+                                if not original_status and edited_status:
+                                    if dm.check_in_registration(int(reg_id)):
+                                        st.success(f"Checked in participant with Reg ID: {reg_id}.")
+                                    else:
+                                        st.error(f"Failed to check in participant with Reg ID: {reg_id}.")
+                                    st.rerun()
+                                elif original_status and not edited_status:
+                                    if dm.uncheck_in_registration(int(reg_id)):
+                                        st.success(f"Unchecked participant with Reg ID: {reg_id}.")
+                                    else:
+                                        st.error(f"Failed to uncheck participant with Reg ID: {reg_id}.")
+                                    st.rerun()
+                            
+                            # Handle removal requests
+                            registrations_to_remove = []
+                            for i in range(len(edited_df)):
+                                if edited_df.loc[i, "Remove"]:
+                                    reg_id = edited_df.loc[i, "Reg ID"]
+                                    name = edited_df.loc[i, "Name"]
+                                    registrations_to_remove.append((reg_id, name))
+                            
+                            if registrations_to_remove:
+                                st.warning(f"⚠️ You are about to remove {len(registrations_to_remove)} registration(s). This action cannot be undone!")
+                                for reg_id, name in registrations_to_remove:
+                                    st.write(f"- {name} (ID: {reg_id})")
+                                
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if st.button("✅ Confirm Removal", type="primary", key="confirm_bulk_remove"):
+                                        removed_count = 0
+                                        for reg_id, name in registrations_to_remove:
+                                            if dm.cancel_registration(int(reg_id)):
+                                                removed_count += 1
+                                            else:
+                                                st.error(f"Failed to remove registration for {name}")
+                                        
+                                        if removed_count > 0:
+                                            st.success(f"Successfully removed {removed_count} registration(s)")
+                                            st.rerun()
+                                with col2:
+                                    if st.button("❌ Cancel", key="cancel_bulk_remove"):
+                                        st.rerun()
+                        else:
+                            st.info("No registrations data to display in editor.")
+            else:
+                st.error("Activity details not found. Please check your data_manager configuration.")
+
     elif admin_action == "Verify by Passphrase & Check-In":
         st.subheader("Verify by Passphrase & Check-In")
-        with st.form("passphrase_verify_form_page"): # Unique key
-            passphrase_input = st.text_input("Enter 4-word Registration Passphrase (e.g., word-word-word-word):", key="admin_passphrase_input_page") # Unique key
+        with st.form("passphrase_verify_form_page"):
+            passphrase_input = st.text_input("Enter 4-word Registration Passphrase (e.g., word-word-word-word):", key="admin_passphrase_input_page")
             verify_button = st.form_submit_button("Verify Passphrase")
         if verify_button and passphrase_input:
             normalized_passphrase = passphrase_input.strip().lower()
@@ -126,7 +171,7 @@ def show_admin_dashboard_page():
                     st.warning("This participant is already checked-in.")
                 else:
                     st.info("Status: Pending Check-In")
-                    checkin_button_key = f"passphrase_checkin_verify_view_page_{registration['id']}" # Unique key
+                    checkin_button_key = f"passphrase_checkin_verify_view_page_{registration['id']}"
                     if st.button("Check-In Participant", key=checkin_button_key, type="primary"):
                         if dm.check_in_registration(registration['id']):
                             st.success(f"Successfully checked in {registration['participant_name']} for {registration['activity']}.")
@@ -141,9 +186,8 @@ def display_admin_page():
     st.title("🔒 Admin Dashboard")
 
     if not st.session_state.get('admin_logged_in', False):
-        # st.sidebar.subheader("Admin Login") # Login can be in the main page area for this page
         with st.form("admin_login_form_page"):
-            st.subheader("Admin Login") # Moved subheader here
+            st.subheader("Admin Login")
             username = st.text_input("Username", key="admin_user_input_page")
             password = st.text_input("Password", type="password", key="admin_pass_input_page")
             login_button = st.form_submit_button("Login")
@@ -153,11 +197,8 @@ def display_admin_page():
                     st.rerun()
                 else:
                     st.error("Invalid credentials.")
-        # st.info("Log in to access admin functions.")
     else:
-        # For a cleaner look on the admin page itself, logout can be just in sidebar.
-        # If preferred, st.sidebar.button can be here too or instead.
-        st.sidebar.success("Admin Logged In") # Keep consistent feedback in sidebar
+        st.sidebar.success("Admin Logged In")
         if st.sidebar.button("Logout Admin", key="admin_logout_page_sidebar"):
             st.session_state.admin_logged_in = False
             st.rerun()
