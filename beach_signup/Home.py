@@ -1,11 +1,66 @@
 import streamlit as st
-import os
-import sys
 import uuid
+from session_manager import sync_session_state_with_url
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-if APP_DIR not in sys.path:
-    sys.path.append(APP_DIR)
+# --- THIS IS THE MOST IMPORTANT STEP ---
+# Call the sync function AT THE VERY TOP of the script.
+sync_session_state_with_url()
+# -----------------------------------------
+
+def initialize_user_session():
+    if 'user_id' not in st.session_state:
+        query_params = st.query_params
+        uid_from_url = query_params.get("uid")
+        if uid_from_url:
+            st.session_state.user_id = uid_from_url[0] if isinstance(uid_from_url, list) else uid_from_url
+        else:
+            new_user_id = f"{str(uuid.uuid4())[:12]}"
+            st.session_state.user_id = new_user_id
+            st.query_params["uid"] = new_user_id
+
+def display_minimal_session_header():
+    """Display session header with clear warnings"""
+    user_id = st.session_state.get('user_id')
+    
+    if user_id:
+        # Construct URL
+        base_url = st.get_option('browser.serverAddress') or 'localhost'
+        full_url = f"https://tday2025.app.tc1.airbase.sg/?uid={user_id}"
+        
+        # Display warning and session info
+        st.warning("⚠️ **Don't close this tab or refresh!** You'll lose your session.")
+        st.success(f"🔗 **Session Active** | Bookmark: [{full_url}]({full_url})")
+        st.divider()
+
+# Call this at the top of your main script
+initialize_user_session()
+display_minimal_session_header()
+
+def display_site_map():
+    """Display the site map section"""
+    st.subheader("🗺️ Event Site Map")
+    
+    # Placeholder for the site map image
+    try:
+        st.image("images/site_map.jpg", 
+                caption="Event Site Map - Shows layout of activities, food stations, and facilities", 
+                use_container_width=True)
+    except:
+        # Placeholder when image is not found
+        st.info("""
+        📍 **Site Map Coming Soon**
+        
+        The event site map will be available here showing:
+        - Activity station locations
+        - Food booth locations
+        - Facilities (toilets, water coolers, etc.)
+        - Registration/check-in points
+        - Emergency exits and first aid stations
+        
+        *Please save your site map image as "images/site_map.jpg" to display it here.*
+        """)
+    
+    st.markdown("---")
 
 def display_siloso_beach_directions(): # Content from 03_Event_Details.py
     st.header("📍 How to Get to Siloso Beach") # Main header for this section
@@ -17,11 +72,22 @@ def display_siloso_beach_directions(): # Content from 03_Event_Details.py
     # Note: Make sure to save the image file in your streamlit app directory
     # You can save the image as "siloso_beach_map.png" or similar
     try:
-        st.image("beach_signup/images/siloso_beach_map.jpeg", 
+        st.image("images/siloso_beach_map.jpeg", 
                 caption="Siloso Beach Location Map - Event venue is marked with the red arrow", 
                 use_container_width =True)
     except:
         st.warning("Map image not found.")
+
+
+    # Additional helpful information
+    st.markdown("### 📝 Additional Tips")
+    st.info("""
+    💡 **Pro Tips:**
+    - The event venue is located near the toilet and water cooler facilities (marked in yellow on the map)
+    - Look for the red "Event Venue Here" sign when you arrive
+    - Beach Station is the main transport hub - all options start from there
+    - Free shuttle services run regularly throughout the day
+    """)
     
     # Add Google Maps link
     st.markdown("### 🗺️ Google Maps Navigation")
@@ -33,7 +99,6 @@ def display_siloso_beach_directions(): # Content from 03_Event_Details.py
         
         """
     )
-    
     st.markdown("---")
     
     st.subheader("From Beach Station (Sentosa Express):")
@@ -66,19 +131,6 @@ def display_siloso_beach_directions(): # Content from 03_Event_Details.py
     - Follow signs to Siloso Beach
     '''
     )
-    st.markdown("---")
-    
-    # Additional helpful information
-    st.markdown("### 📝 Additional Tips")
-    st.info("""
-    💡 **Pro Tips:**
-    - The event venue is located near the toilet and water cooler facilities (marked in yellow on the map)
-    - Look for the red "Event Venue Here" sign when you arrive
-    - Beach Station is the main transport hub - all options start from there
-    - Free shuttle services run regularly throughout the day
-    """)
-    
-    st.success("Enjoy your day at the beach! ☀️")
 
 def main_landing_page():
     st.title("🏖️ Welcome to T-Day 2025!")
@@ -106,5 +158,9 @@ def main_landing_page():
 
     # Call the function to display event details
     display_siloso_beach_directions()
+    display_site_map()
+
+    st.markdown("---")
+    st.success("Enjoy your day at the beach! ☀️")
 
 main_landing_page()
