@@ -1,5 +1,6 @@
 # session_manager.py
 import streamlit as st
+import uuid
 
 def sync_session_state_with_url():
     """
@@ -40,3 +41,9 @@ def sync_session_state_with_url():
         # If the state value is None, remove it from the URL
         elif url_key in st.query_params:
             del st.query_params[url_key]
+
+def initialize_user_if_needed():
+    """Initialize user_id if it doesn't exist in session state"""
+    if 'user_id' not in st.session_state or not st.session_state.user_id:
+        new_user_id = f"{str(uuid.uuid4())[:12]}"
+        st.session_state.user_id = new_user_id

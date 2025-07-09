@@ -22,3 +22,4 @@ def validate_email(email):
     if re.match(pattern, email):
         return True
     return False
+

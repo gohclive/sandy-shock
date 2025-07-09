@@ -13,12 +13,29 @@ project_root_or_beach_signup_dir = os.path.dirname(current_file_dir) # This shou
 if project_root_or_beach_signup_dir not in sys.path:
     sys.path.append(project_root_or_beach_signup_dir)
 
-from session_manager import sync_session_state_with_url
+from session_manager import sync_session_state_with_url, initialize_user_if_needed
 
 # --- THIS IS THE MOST IMPORTANT STEP ---
 # Call the sync function AT THE VERY TOP of the script.
 sync_session_state_with_url()
+initialize_user_if_needed()
 # -----------------------------------------
+
+def display_minimal_session_header():
+    """Display session header with clear warnings"""
+    user_id = st.session_state.get('user_id')
+    
+    if user_id:
+        # Construct URL
+        base_url = st.get_option('browser.serverAddress') or 'localhost'
+        full_url = f"https://tday2025.app.tc1.airbase.sg/?uid={user_id}"
+        
+        # Display warning and session info
+        st.warning("⚠️ **Don't close this tab** You'll lose your session.")
+        st.success(f"🔗 **Session Active** | Bookmark: [{full_url}]({full_url})")
+        st.divider()
+
+display_minimal_session_header()
 
 import data_manager as dm
 import utils as ut
@@ -43,16 +60,12 @@ def get_current_singapore_time():
 
 # Function to display the participant sign-up page
 def show_signup_page(participant_session_id, current_participant_profile):
-    st.header("📝 Sign Up For Activities")
+    st.header("📝 Sign Up For Massage by SAVH")
 
     # --- Display Activity Availability Grid (Moved Up) ---
     all_activities_details = dm.ACTIVITIES # Get the full list of activity dicts
     
     st.subheader("Current Availability")
-
-    """Display disclaimer about limited material sets."""
-    st.info("📦 **Limited materials (200 sets each) - while supplies last! Canvas & Tote Bag stations will close once materials run out**")
-
 
     for activity_detail in all_activities_details:
         activity_name = activity_detail["name"]
@@ -87,13 +100,22 @@ def show_signup_page(participant_session_id, current_participant_profile):
                  st.markdown(f"<font color='red'>All timeslots for this activity are currently full.</font>", unsafe_allow_html=True)
             
             if activity_timeslots_info: # Check if there's any info to display
-                num_columns = 2
-                if len(activity_specific_timeslots) > 6: # Base columns on number of actual timeslots
-                     num_columns = 3
-
-                cols = st.columns(num_columns)
+                num_timeslots = len(activity_specific_timeslots)
+    
+                # Mobile-first approach: start with 1 column, then scale up
+                if num_timeslots <= 2:
+                    num_columns = 1
+                elif num_timeslots <= 4:
+                    num_columns = 2
+                else:
+                    num_columns = 2  # Keep max 2 columns for mobile readability
+                
+                # Create responsive columns with gap
+                cols = st.columns(num_columns, gap="small")
+                
                 for i, info_md in enumerate(activity_timeslots_info):
-                    cols[i % num_columns].markdown(info_md, unsafe_allow_html=True)
+                    with cols[i % num_columns]:
+                        st.markdown(info_md, unsafe_allow_html=True)
 
     # --- Conditional Display: Warning or Signup Form ---
     user_existing_registrations = dm.get_user_registrations(participant_session_id)
@@ -110,14 +132,15 @@ def show_signup_page(participant_session_id, current_participant_profile):
         with st.form("registration_form_no_email"):
             name = st.text_input("Your Full Name:", value=default_name, key="reg_form_name_v2")
             
-            # Simplified activity selection without callbacks
-            selected_activity_name = st.selectbox( 
-                "Choose an Activity:", 
-                options=activity_names_list, 
-                key="reg_form_activity_select_key"
-            )
+            # Static activity selection - assuming only one activity available
+            if activity_names_list:
+                selected_activity_name = activity_names_list[0]  # Take the first (and only) activity
+                st.markdown(f"**Activity:** {selected_activity_name}")
+            else:
+                st.error("No activities are currently available for booking.")
+                selected_activity_name = None
             
-            activity_details = dm.get_activity_details(selected_activity_name)
+            activity_details = dm.get_activity_details(selected_activity_name) if selected_activity_name else None
             
             selected_timeslot = None 
             activity_specific_timeslots = [] 
@@ -125,16 +148,16 @@ def show_signup_page(participant_session_id, current_participant_profile):
             if activity_details:
                 activity_specific_timeslots = dm.get_timeslots(activity_details["duration"])
                 if not activity_specific_timeslots:
-                    st.warning(f"No available timeslots for {selected_activity_name} based on its duration and event times. Please select another activity.", icon="⚠️")
+                    st.warning(f"No available timeslots for {selected_activity_name} based on its duration and event times. Please contact support.", icon="⚠️")
                 else:
                     selected_timeslot = st.selectbox(
                         "Choose a Timeslot:", 
                         options=activity_specific_timeslots, 
                         key=f"reg_form_timeslot_v2_{activity_details['id']}" 
                     )
-            elif activity_names_list: # Only show error if there were activities to select from but details were not found
+            elif selected_activity_name: # Only show error if there was an activity selected but details were not found
                 st.error("Could not find details for the selected activity. Please refresh or contact support.")
-            # If activity_names_list is empty, no error, form will just be mostly disabled.
+            # If no activity available, no error, form will just be mostly disabled.
 
             is_slot_full_check = False 
             current_activity_capacity = 0 
@@ -239,19 +262,19 @@ def show_my_bookings_page(user_id, participant_profile):
 def display_user_portal():
     # --- Portal Lock Logic ---
     singapore_tz = pytz.timezone('Asia/Singapore')
-    unlock_date = singapore_tz.localize(datetime.datetime(2025, 7, 10, 0, 0, 0))
+    unlock_date = singapore_tz.localize(datetime.datetime(2025, 7, 10, 13, 30, 0))
     current_sg_time = get_current_singapore_time()
 
-    if current_sg_time < unlock_date:
-        st.title("🏖️ User Portal - Temporarily Closed")
-        st.image("https://images.unsplash.com/photo-1507525428034-b723cf961d3e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80", use_container_width=True) # Example beach image
-        st.warning(
-            f"The User Portal is currently closed. "
-            f"It will become accessible on **July 10, 2025** (Singapore Time)."
-        )
-        st.info(f"Current Singapore Time: {current_sg_time.strftime('%Y-%m-%d %I:%M %p')}")
-        st.info(f"Scheduled Unlock Time: {unlock_date.strftime('%Y-%m-%d %I:%M %p')}")
-        return # Stop further execution if portal is locked
+    # if current_sg_time < unlock_date:
+    #     st.title("📝 Sign Up For Massage by SAVH - Temporarily Closed")
+    #     st.image("https://images.unsplash.com/photo-1507525428034-b723cf961d3e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80", use_container_width=True) # Example beach image
+    #     st.warning(
+    #         f"The sign up for massage by SAVH is currently closed. "
+    #         f"It will become accessible on **July 10, 2025** (Singapore Time)."
+    #     )
+    #     st.info(f"Current Singapore Time: {current_sg_time.strftime('%Y-%m-%d %I:%M %p')}")
+    #     st.info(f"Scheduled Unlock Time: {unlock_date.strftime('%Y-%m-%d %I:%M %p')}")
+    #     return # Stop further execution if portal is locked
 
     user_id = st.session_state.user_id
     participant_profile = dm.find_participant_by_id(user_id)
@@ -271,7 +294,6 @@ def display_user_portal():
         if 'last_signup_details' in st.session_state:
             del st.session_state.last_signup_details
 
-    st.title("🏖️ User Portal") # Or "Beach Day Activity Signup"
     st.sidebar.subheader("User Actions")
     st.sidebar.caption(
         "Tip: Your session is unique to this URL. "

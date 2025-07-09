@@ -1,17 +1,36 @@
 import streamlit as st
 
-from session_manager import sync_session_state_with_url
+from session_manager import sync_session_state_with_url, initialize_user_if_needed
 
 # --- THIS IS THE MOST IMPORTANT STEP ---
 # Call the sync function AT THE VERY TOP of the script.
 sync_session_state_with_url()
+initialize_user_if_needed()
+
+
 # -----------------------------------------
+
+def display_minimal_session_header():
+    """Display session header with clear warnings"""
+    user_id = st.session_state.get('user_id')
+    
+    if user_id:
+        # Construct URL
+        base_url = st.get_option('browser.serverAddress') or 'localhost'
+        full_url = f"https://tday2025.app.tc1.airbase.sg/?uid={user_id}"
+        
+        # Display warning and session info
+        st.warning("⚠️ **Don't close this tab** You'll lose your session.")
+        st.success(f"🔗 **Session Active** | Bookmark: [{full_url}]({full_url})")
+        st.divider()
+
+display_minimal_session_header()
 
 def display_sentosa_qr_page():
     st.title("🎫 Sentosa Entry QR Code")
 
     # Placeholder QR code URL
-    qr_code_url = "beach_signup/images/qr-code.png"
+    qr_code_url = "images/qr-code.png"
     st.image(qr_code_url, width=250)
 
     st.subheader("Important Information")

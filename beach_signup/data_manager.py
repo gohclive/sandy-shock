@@ -106,6 +106,52 @@ def initialize_database():
         print("Created registrations table.")
     else:
         print("Registrations table already exists.")
+
+    # Check if competitive_games table exists
+    cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'competitive_games'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE competitive_games (
+                id INT PRIMARY KEY IDENTITY(1,1),
+                name NVARCHAR(255) NOT NULL UNIQUE
+            )
+        ''')
+        print("Created competitive_games table.")
+    else:
+        print("Competitive_games table already exists.")
+
+    # Check if teams table exists
+    cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'teams'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE teams (
+                id INT PRIMARY KEY IDENTITY(1,1),
+                name NVARCHAR(255) NOT NULL UNIQUE
+            )
+        ''')
+        print("Created teams table.")
+    else:
+        print("Teams table already exists.")
+
+    # Check if game_scores table exists
+    cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'game_scores'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE game_scores (
+                id INT PRIMARY KEY IDENTITY(1,1),
+                game_id INT NOT NULL,
+                team_id INT NOT NULL,
+                score INT DEFAULT 0,
+                last_updated_time DATETIME2 NOT NULL,
+                FOREIGN KEY (game_id) REFERENCES competitive_games (id) ON DELETE CASCADE,
+                FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE,
+                CONSTRAINT UQ_game_team UNIQUE (game_id, team_id)
+            )
+        ''')
+        print("Created game_scores table.")
+    else:
+        print("Game_scores table already exists.")
+
     conn.commit()
     conn.close()
 
@@ -327,10 +373,7 @@ def get_activities():
 
 # Define activities with their properties
 ACTIVITIES = [
-    {"name": "Canvas Painting", "slots": 72, "duration": 45, "id": "canvas_painting"},
-    {"name": "Tote Bag Painting", "slots": 72, "duration": 45, "id": "tote_bag_painting"},
-    {"name": "Shrink Art Keychain", "slots": 48, "duration": 20, "id": "shrink_art_keychain"},
-    {"name": "Massage by SAVH", "slots": 12, "duration": 30, "id": "massage_SAVH"},
+    {"name": "Massage by SAVH", "slots": 15, "duration": 20, "id": "massage_SAVH"},
 ]
 
 def get_activity_details(activity_name):
@@ -377,3 +420,203 @@ def get_timeslots(activity_duration_minutes):
             break
             
     return timeslots
+
+# --- Competitive Games Functions ---
+
+def add_competitive_game(name):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO competitive_games (name) VALUES (?)", (name,))
+        conn.commit()
+        return True
+    except pyodbc.IntegrityError: # Handles unique constraint violation for name
+        conn.rollback()
+        return False # Game name likely already exists
+    except pyodbc.Error as e:
+        print(f"Database error in add_competitive_game: {e}")
+        conn.rollback()
+        return False
+    finally:
+        if conn: conn.close()
+
+def get_competitive_games():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM competitive_games ORDER BY name")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in rows]
+
+def delete_competitive_game(game_id):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        # Scores related to this game will be deleted due to ON DELETE CASCADE
+        cursor.execute("DELETE FROM competitive_games WHERE id = ?", (game_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except pyodbc.Error as e:
+        print(f"Database error in delete_competitive_game: {e}")
+        conn.rollback()
+        return False
+    finally:
+        if conn: conn.close()
+
+# --- Teams Functions ---
+
+def add_team(name):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO teams (name) VALUES (?)", (name,))
+        conn.commit()
+        return True
+    except pyodbc.IntegrityError: # Handles unique constraint violation for name
+        conn.rollback()
+        return False # Team name likely already exists
+    except pyodbc.Error as e:
+        print(f"Database error in add_team: {e}")
+        conn.rollback()
+        return False
+    finally:
+        if conn: conn.close()
+
+def get_teams():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM teams ORDER BY name")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in rows]
+
+def delete_team(team_id):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        # Scores related to this team will be deleted due to ON DELETE CASCADE
+        cursor.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except pyodbc.Error as e:
+        print(f"Database error in delete_team: {e}")
+        conn.rollback()
+        return False
+    finally:
+        if conn: conn.close()
+
+# --- Game Scores Functions ---
+
+def update_score(game_id, team_id, score):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        current_time = datetime.now()
+        # Upsert logic: Insert if not exists, update if exists
+        # Check if score entry exists
+        cursor.execute("SELECT id FROM game_scores WHERE game_id = ? AND team_id = ?", (game_id, team_id))
+        existing_score = cursor.fetchone()
+
+        if existing_score:
+            cursor.execute(
+                "UPDATE game_scores SET score = ?, last_updated_time = ? WHERE id = ?",
+                (score, current_time, existing_score[0])
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO game_scores (game_id, team_id, score, last_updated_time) VALUES (?, ?, ?, ?)",
+                (game_id, team_id, score, current_time)
+            )
+        conn.commit()
+        return True
+    except pyodbc.Error as e:
+        print(f"Database error in update_score: {e}")
+        conn.rollback()
+        return False
+    finally:
+        if conn: conn.close()
+
+def get_all_scores():
+    """
+    Fetches all scores and structures them for easy display, e.g., a pivot table like structure.
+    Returns a dictionary where keys are team names and values are dictionaries of game_name: score.
+    Also returns lists of all game names and team names for header/row generation.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Get all games and teams first to ensure all are represented
+    cursor.execute("SELECT id, name FROM competitive_games ORDER BY name")
+    games_list = [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in cursor.fetchall()]
+    
+    cursor.execute("SELECT id, name FROM teams ORDER BY name")
+    teams_list = [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in cursor.fetchall()]
+
+    # Fetch all scores with game and team names
+    sql = """
+    SELECT t.name as team_name, cg.name as game_name, gs.score
+    FROM game_scores gs
+    JOIN teams t ON gs.team_id = t.id
+    JOIN competitive_games cg ON gs.game_id = cg.id
+    """
+    cursor.execute(sql)
+    scores_raw = cursor.fetchall()
+    conn.close()
+
+    # Initialize score_data with all teams and games, defaulting scores to 0 or None
+    score_data = {team['name']: {game['name']: 0 for game in games_list} for team in teams_list}
+
+    for score_row in scores_raw:
+        score_data[score_row.team_name][score_row.game_name] = score_row.score
+    
+    game_names = [game['name'] for game in games_list]
+    team_names = [team['name'] for team in teams_list]
+
+    return score_data, game_names, team_names
+
+
+def get_scores_for_game(game_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    sql = """
+    SELECT t.name as team_name, gs.score, gs.last_updated_time
+    FROM game_scores gs
+    JOIN teams t ON gs.team_id = t.id
+    WHERE gs.game_id = ?
+    ORDER BY t.name
+    """
+    cursor.execute(sql, game_id)
+    rows = cursor.fetchall()
+    conn.close()
+    return [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in rows]
+
+def get_scores_for_team(team_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    sql = """
+    SELECT cg.name as game_name, gs.score, gs.last_updated_time
+    FROM game_scores gs
+    JOIN competitive_games cg ON gs.game_id = cg.id
+    WHERE gs.team_id = ?
+    ORDER BY cg.name
+    """
+    cursor.execute(sql, team_id)
+    rows = cursor.fetchall()
+    conn.close()
+    return [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in rows]
+
+def get_team_total_scores():
+    """Calculates total scores for each team."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    sql = """
+    SELECT t.name as team_name, SUM(gs.score) as total_score
+    FROM teams t
+    LEFT JOIN game_scores gs ON t.id = gs.team_id
+    GROUP BY t.id, t.name
+    ORDER BY total_score DESC, t.name
+    """
+    cursor.execute(sql)
+    rows = cursor.fetchall()
+    conn.close()
+    return [{desc[0]: value for desc, value in zip(cursor.description, row)} for row in rows]
